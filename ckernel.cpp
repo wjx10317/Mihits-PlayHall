@@ -1,0 +1,589 @@
+#include "ckernel.h"
+#include"TcpClientMediator.h"
+#include"netapi/net/packdef.h"
+#include<QMessageBox>
+#include<QDebug>
+#include"md5/md5.h"
+/*
+#include<QMetaType>
+qRegisterMetaType<classname>("classname");
+*/
+#include<QSettings>
+#include<QCoreApplication>
+#include<QFileInfo>
+void CKernel::ConfigSet()
+{
+    //获取配置文件的信息以及设置
+    //.ini 配置文件
+    //[net] 组名 GroupName
+    //key=value
+
+    //1.ip默认
+    strcpy( m_serverIP , _DEF_SERVER_IP );
+    //2.设置和获取配置文件  有还是没有 配置文件在哪里？ 设置和exe同一级的目录
+    //exe的目录
+    QString path =QCoreApplication::applicationDirPath()+"/config.ini";
+    QFileInfo info(path);
+    if(info.exists())
+    {
+        QSettings setting(path,QSettings::IniFormat,nullptr);
+        setting.beginGroup("net");
+        QVariant var =setting.value("ip");
+        QString strip = var.toString();
+        if(!strip.isEmpty())
+        {
+            strcpy(m_serverIP,strip.toStdString().c_str());
+
+        }
+        setting.endGroup();
+    }
+    else
+    {
+        QSettings setting(path,QSettings::IniFormat,nullptr);
+        setting.beginGroup("net");
+        setting.setValue("ip",QString::fromStdString(m_serverIP));
+        setting.endGroup();
+    }
+}
+
+static std::string getmd5(QString str)
+{
+    MD5 md(str.toStdString());
+    return md.toString();
+}
+CKernel::CKernel(QObject *parent):
+    QObject(parent),m_dialog(new Dialog),m_logindialog(new LoginDialog),
+    m_roomdialog(new roomDialog),m_fiveinlinezone(new fiveinlinezone),m_client(new TcpClientMediator),
+    m_id(0),m_roomid(0),m_zoneid(0)
+
+{
+    m_logindialog->show();
+    ConfigSet();
+    m_client->OpenNet(m_serverIP,_DEF_TCP_PORT);
+    connect(m_client,SIGNAL(SIG_ReadyData( unsigned int, char*, int)),
+            this,SLOT(slot_deal_readydata(unsigned int, char*, int)));
+    connect(m_dialog,SIGNAL(SIG_CLOSE()),
+            this,SLOT(Des_Instance()));
+    connect(m_logindialog,SIGNAL(SIG_CLOSE()),
+            this,SLOT(Des_Instance()));
+    connect(m_logindialog,SIGNAL(SIG_LOGIN_COMMIT(QString,QString)),
+            this,SLOT(slot_loginRq(QString,QString)));
+    connect(m_logindialog,SIGNAL(SIG_REGISTER_COMMIT(QString,QString,QString)),
+            this,SLOT(slot_registerRq(QString,QString,QString)));
+    connect(m_dialog,SIGNAL(SIG_JOINZONE(int)),
+            this,SLOT(slot_joinzone(int)));
+    connect(m_fiveinlinezone,SIGNAL(SIG_ZONE_JOINROOM(int)),
+            this,SLOT(slot_joinroom(int)));
+    connect(m_fiveinlinezone,SIGNAL(SIG_CLOSE()),
+            this,SLOT(slot_leavezone()));
+    connect(m_roomdialog,SIGNAL(SIG_CLOSE()),this,SLOT(slot_leaveroom()));
+    connect(m_roomdialog,SIGNAL(SIG_gameReady(int,int,int)),
+            this,SLOT(slot_sendgameready(int,int,int)));
+    connect(m_roomdialog,SIGNAL(SIG_gameStart(int,int)),
+            this,SLOT(slot_sendgamestart(int,int)));
+    connect(m_roomdialog,SIGNAL(SIG_gamenotReady(int,int,int)),
+            this,SLOT(slot_sendgamenotready(int,int,int)));
+    connect(m_roomdialog,SIGNAL(SIG_PIECEDOWN(int ,int,int)),
+            this,SLOT(slot_sendpiecedown(int,int,int) ));
+    connect(m_roomdialog,SIGNAL( SIG_PLAYBYCPUBEGIN(int,int,int) ),
+            this,SLOT(slot_PlayByCpuBegin(int,int,int)));
+    connect(m_roomdialog,SIGNAL( SIG_PLAYBYCPUEND(int,int,int) ),
+            this,SLOT(slot_PlayByCpuEnd(int,int,int)));
+    connect(&m_rqtimer,SIGNAL(timeout()),this,SLOT( slot_roominfozone() ));
+    connect(m_roomdialog,SIGNAL(SIG_GAMEOVER()),this,SLOT(slot_gameoverrq()));
+    connect(m_fiveinlinezone,SIGNAL(SIG_ALLRECORD()),this,SLOT(slot_sendrecordrq()));
+    connect(m_fiveinlinezone,SIGNAL(SIG_SINGLERECORD(QString)),this,SLOT(slot_sendsinglerecordrq(QString)));
+    connect(m_roomdialog,SIGNAL(SIG_SHOWBACK()),this,SLOT(slot_reshowwindow()));
+    setnetpackmap();
+
+}
+void CKernel::Des_Instance()
+{
+    qDebug()<<__func__;
+    delete m_dialog;
+    delete m_client;
+    delete m_logindialog;
+}
+void CKernel::setnetpackmap()
+{
+    m_NetPackMap[ _DEF_PACK_REGISTER_RS - _DEF_PACK_BASE ]= &CKernel::slot_registerRs;
+    m_NetPackMap[ _DEF_PACK_LOGIN_RS - _DEF_PACK_BASE ]= &CKernel::slot_loginRs;
+    m_NetPackMap[ DEF_JOIN_ROOM_RS - _DEF_PACK_BASE ]= &CKernel::slot_joinroomrs;
+    m_NetPackMap[ DEF_ROOM_MEMBER - _DEF_PACK_BASE ]= &CKernel::slot_roommemberrq;
+    m_NetPackMap[ DEF_LEAVE_ROOM_RQ - _DEF_PACK_BASE ]= &CKernel::slot_leaveroomrq;
+    m_NetPackMap[ DEF_ZONE_ROOM_INFO - _DEF_PACK_BASE ]= &CKernel::slot_dealzoneroominfo;
+    m_NetPackMap[ DEF_FIL_ROOM_READY  -_DEF_PACK_BASE]=&CKernel::slot_dealroomready;
+    m_NetPackMap[ DEF_FIL_ROOM_NOTREADY  -_DEF_PACK_BASE]=&CKernel::slot_dealroomnotready;
+    m_NetPackMap[ DEF_FIL_GAME_START  -_DEF_PACK_BASE]=&CKernel::slot_dealroomstart;
+    m_NetPackMap[ DEF_FIL_AI_BEGIN    -_DEF_PACK_BASE]=&CKernel::slot_dealaibegin;
+    m_NetPackMap[ DEF_FIL_AI_END      -_DEF_PACK_BASE]=&CKernel::slot_dealaiend;
+    //m_NetPackMap[ DEF_FIL_DISCARD_THIS-_DEF_PACK_BASE]=&CKernel::slot_
+    //m_NetPackMap[ DEF_FIL_SURREND     -_DEF_PACK_BASE]=&CKernel::slot_
+    m_NetPackMap[ DEF_FIL_PIECEDOWN   -_DEF_PACK_BASE]=&CKernel::slot_dealpiecedown;
+    m_NetPackMap[DEF_FIL_ALLRECORD_RS - _DEF_PACK_BASE] = &CKernel::slot_deal_allrecordrs;
+    m_NetPackMap[DEF_FIL_SINGLERECORD_RS - _DEF_PACK_BASE] = &CKernel::slot_deal_singlerecordrs;
+
+}
+void CKernel::sendData(char* buf , int nlen )
+{
+    m_client->SendData(0,buf,nlen);
+}
+void CKernel::slot_deal_readydata(unsigned int lSendIP , char* buf , int nlen)
+{
+    int type = *(int*)buf;
+    if(type>=_DEF_PACK_BASE&&type<_DEF_PACK_BASE+_DEF_PACK_COUNT)
+    {
+        PFUN pf = NetPackMap(type);
+        if(pf==nullptr)
+        {
+
+            qDebug()<<"fun ptr not inititalized:"<<type;
+            return ;
+        }
+        (this->*pf)(lSendIP,buf,nlen);
+    }
+    else
+    {
+            qDebug()<<"protocol types err";
+    }
+    delete [] buf;
+}
+void CKernel::slot_registerRq(QString tel,QString password,QString nick)
+{
+    STRU_REGISTER_RQ rq;
+    strcpy(rq.tel,tel.toStdString().c_str());
+     strcpy(rq.password,getmd5(password).c_str());
+    //兼容中文
+    std::string strname = nick.toStdString();
+    strcpy(rq.name,strname.c_str());
+    qDebug()<<"send register request";
+    sendData((char*)&rq,sizeof(rq));
+}
+void CKernel::slot_loginRq(QString tel,QString password)
+{
+    STRU_LOGIN_RQ rq;
+    strcpy(rq.tel,tel.toStdString().c_str());
+    strcpy(rq.password,getmd5(password).c_str());
+     sendData((char*)&rq,sizeof(rq));
+
+}
+void CKernel::slot_registerRs(unsigned int lSendIP , char* buf , int nlen)
+{
+    STRU_REGISTER_RS rs = *(STRU_REGISTER_RS*)buf;
+    switch(rs.result)
+    {
+        case tel_is_exist:
+        QMessageBox::about(this->m_logindialog,"提示","电话号码已存在");
+        break;
+        case name_is_exist:
+        QMessageBox::about(this->m_logindialog,"提示","昵称已存在");
+        break;
+        case register_success:
+         QMessageBox::about(this->m_logindialog,"提示","注册成功");
+        break;
+        default:
+        QMessageBox::about(this->m_logindialog,"提示","注册异常");
+        break;
+    }
+
+
+}
+void CKernel::slot_loginRs(unsigned int lSendIP , char* buf , int nlen)
+{
+    STRU_LOGIN_RS rs = *(STRU_LOGIN_RS*)buf;
+    switch(rs.result)
+    {
+        case user_not_exist:
+        QMessageBox::about(this->m_logindialog,"提示","用户不存在");
+        break;
+        case password_error:
+        QMessageBox::about(this->m_logindialog,"提示","密码错误");
+        break;
+        case login_success:
+        m_logindialog->hide();
+        m_dialog->show();
+        m_id = rs.userid;
+        m_username = QString::fromStdString(rs.name);
+
+        break;
+        default:
+        QMessageBox::about(this->m_logindialog,"提示","登录异常");
+        break;
+    }
+
+}
+
+void CKernel::slot_joinzone(int zoneid)
+{
+    m_rqtimer.start(1000);
+    m_zoneid =zoneid;
+    STRU_JOIN_ZONE rq;
+    rq.userid = m_id;
+    rq.zoneid = zoneid;
+    sendData((char*)&rq,sizeof(rq));
+    switch(zoneid)
+    {
+        case Five_In_Line:
+            m_fiveinlinezone->show();
+        break;
+        default:
+        break;
+    }
+
+
+
+}
+
+void CKernel::slot_joinroom(int roomid)
+{
+    //m_fiveinlinezone->hide();
+    //加入成功后隐藏
+    if(m_roomid!=0)
+    {
+        QMessageBox::about(nullptr,"提示","已经在房间，无法重复加入");
+    }
+
+    STRU_JOIN_ROOM_RQ rq;
+    rq.userid = m_id;
+    rq.roomid =roomid;
+    sendData((char*)&rq,sizeof(rq));
+}
+void CKernel::slot_leavezone()
+{
+    m_rqtimer.stop();
+    //成员属性修改
+    m_zoneid =0;
+
+    //请求
+    STRU_LEAVE_ZONE rq;
+    rq.userid = m_id;
+    sendData((char*)&rq,sizeof(rq));
+    //ui跳转
+    m_dialog->show();
+}
+void CKernel::slot_joinroomrs( unsigned int lSendIP , char* buf , int nlen)
+{
+    STRU_JOIN_ROOM_RS* rs = (STRU_JOIN_ROOM_RS*)buf;
+    if(rs->result==0)
+    {
+        QMessageBox::about(m_fiveinlinezone,"提示","加入房间失败");
+        return;
+    }
+    if(rs->status==_host)
+    {
+        m_ishost =true;
+    }
+    m_roomid = rs->roomid;
+
+//根据zoneid找到需要隐藏的分区
+    m_fiveinlinezone->hide();
+    //同理
+    m_roomdialog->show();
+    m_roomdialog->setinfo(m_roomid);
+
+
+}
+void CKernel::slot_roommemberrq( unsigned int lSendIP , char* buf , int nlen)
+{
+    STRU_ROOM_MENBER* rq = (STRU_ROOM_MENBER*)buf;
+    if(rq->status==_host)
+    {
+        m_roomdialog->setHostInfo(rq->userid,QString::fromStdString(rq->name));
+        m_roomdialog->addmem(rq->userid,QString::fromStdString(rq->name));
+    }
+    else if(rq->status==_player)
+    {
+        m_roomdialog->setPlayerInfo(rq->userid,QString::fromStdString(rq->name));
+        m_roomdialog->addmem(rq->userid,QString::fromStdString(rq->name));
+    }
+    else
+    {
+        m_roomdialog->addmem(rq->userid,QString::fromStdString(rq->name));
+    }
+
+    if(rq->userid==m_id)
+    {
+        m_roomdialog->setUserStatus(rq->status);
+    }
+}
+void CKernel::slot_leaveroom()
+{
+    //这个人主动离开
+    STRU_LEAVE_ROOM_RQ rq;
+    rq.status = m_roomdialog->getStatus();
+    rq.userid = m_id;
+    rq.roomid = m_roomid;
+    sendData((char*)&rq , sizeof(rq));
+
+    //界面
+    m_roomdialog->clearroom();
+    m_roomdialog->hide();
+    m_fiveinlinezone->show();
+
+    //后台数据
+    m_roomid = 0;
+    m_ishost = false;
+}
+void CKernel::slot_leaveroomrq(unsigned int lSendIP , char* buf , int nlen)
+{//补加判断游戏是否开始，否则直接判负结束游戏，不保存
+
+    STRU_LEAVE_ROOM_RQ* rq =(STRU_LEAVE_ROOM_RQ*)buf;
+    if(rq->status==_host)
+    {
+        if(m_roomdialog->getStatus()==_player)
+        {
+            m_ishost =true;
+            m_roomdialog->setUserStatus(_host);
+            m_roomdialog->setHostInfo(m_id,m_username);
+            m_roomdialog->clearPlayerInfo();
+            m_roomdialog->rmmem(rq->userid);
+            m_roomdialog->loadnewPlayerInfo();
+
+        }
+        else if(m_roomdialog->getStatus()==_spec)
+        {
+            if(m_roomdialog->isfirstspec(m_id))
+            {
+                m_roomdialog->setUserStatus(_player);
+            }
+            m_roomdialog->setPlayerInfotoHost();
+            m_roomdialog->clearPlayerInfo();
+            m_roomdialog->rmmem(rq->userid);
+            m_roomdialog->loadnewPlayerInfo();
+
+
+        }
+    }
+    else if(rq->status==_player)
+    {
+        if(m_roomdialog->getStatus()== _host)
+        {
+            m_roomdialog->clearPlayerInfo();
+            m_roomdialog->rmmem(rq->userid);
+            m_roomdialog->loadnewPlayerInfo();
+        }
+        else if(m_roomdialog->getStatus()== _spec)
+        {
+            if(m_roomdialog->isfirstspec(m_id))
+            {
+                m_roomdialog->setUserStatus(_player);
+            }
+             m_roomdialog->clearPlayerInfo();
+             m_roomdialog->rmmem(rq->userid);
+             m_roomdialog->loadnewPlayerInfo();
+        }
+
+    }
+    else
+    {
+        m_roomdialog->rmmem(rq->userid);
+    }
+
+
+
+
+}
+void CKernel::slot_sendgameready(int zoneid,int roomid,int userid)
+{
+    STRU_FIL_RQ rq(DEF_FIL_ROOM_READY);
+    rq.zoneid = zoneid;
+    rq.roomid =roomid;
+    rq.userid =userid;
+    sendData((char*)&rq,sizeof(rq));
+}
+void CKernel::slot_sendgamestart(int zoneid, int roomid)
+{
+    STRU_FIL_RQ rq(DEF_FIL_GAME_START);
+    rq.zoneid = zoneid;
+    rq.roomid =roomid;
+    sendData((char*)&rq,sizeof(rq));
+}
+void CKernel::slot_sendgamenotready(int zoneid,int roomid,int userid)
+{
+    STRU_FIL_RQ rq(DEF_FIL_ROOM_NOTREADY);
+    rq.zoneid = zoneid;
+    rq.roomid =roomid;
+    rq.userid =userid;
+    sendData((char*)&rq,sizeof(rq));
+}
+void CKernel::slot_dealroomready(unsigned int lSendIP , char* buf , int nlen)
+{
+    // 拆包
+    qDebug()<<__func__;
+    STRU_FIL_RQ* rq = (STRU_FIL_RQ*)buf;
+    // 什么专区 什么房间 谁 做了什么事
+    if( rq->roomid == m_roomid ){
+        m_roomdialog->setPlayerReady( rq->userid );
+    }
+}
+void CKernel::slot_dealroomnotready(unsigned int lSendIP , char* buf , int nlen)
+{
+    // 拆包
+    STRU_FIL_RQ* rq = (STRU_FIL_RQ*)buf;
+    // 什么专区 什么房间 谁 做了什么事
+    if( rq->roomid == m_roomid ){
+        m_roomdialog->delPlayerReady( rq->userid );
+    }
+}
+void CKernel::slot_dealroomstart(unsigned int lSendIP , char* buf , int nlen)
+{
+    STRU_FIL_RQ* rq = (STRU_FIL_RQ*)buf;
+    // 什么专区 什么房间 谁 做了什么事
+    if( rq->roomid == m_roomid ){
+        m_roomdialog->setGameStart();
+    }
+}
+void CKernel::slot_dealpiecedown(unsigned int lSendIP , char* buf , int nlen)
+{
+    STRU_FIL_PIECEDOWN* rq = (STRU_FIL_PIECEDOWN*)buf;
+    m_roomdialog->slot_piecedown(rq->color,rq->x,rq->y);
+}
+
+void CKernel::slot_gameoverrq()
+{
+    STRU_FIL_RQ rq(DEF_FIL_WIN);
+    rq.roomid = m_roomid;
+    rq.userid = m_id;
+    rq.zoneid = m_zoneid;
+    sendData((char*)&rq,sizeof(rq));
+}
+
+
+void CKernel::slot_sendpiecedown(int blackorwhite, int x , int y)
+{
+    STRU_FIL_PIECEDOWN rq;
+    rq.color =blackorwhite;
+    rq.roomid =m_roomid;
+    rq.userid = m_id;
+    rq.x =x;
+    rq.y =y;
+    rq.zoneid = m_zoneid;
+    sendData((char*)&rq,sizeof(rq));
+}
+
+void CKernel::slot_PlayByCpuBegin(int zoneid, int roomid, int userid)
+{
+    //发包
+    STRU_FIL_RQ rq(DEF_FIL_AI_BEGIN);
+    rq.roomid = roomid;
+    rq.userid = userid;
+    rq.zoneid = zoneid;
+
+    sendData( (char*)&rq , sizeof(rq) );
+}
+
+void CKernel::slot_PlayByCpuEnd(int zoneid, int roomid, int userid)
+{
+    STRU_FIL_RQ rq(DEF_FIL_AI_END);
+    rq.roomid = roomid;
+    rq.userid = userid;
+    rq.zoneid = zoneid;
+
+    sendData( (char*)&rq , sizeof(rq) );
+}
+
+void CKernel::slot_dealaibegin(unsigned int lSendIP, char *buf, int nlen)
+{
+    //拆包
+    qDebug()<<__func__;
+    STRU_FIL_RQ * rq = (STRU_FIL_RQ *)buf;
+    //查看身份
+    //rq->zoneid; // 根据专区 看房间
+   // rq->roomid; // 根据房间看ui
+    if( m_id == rq->userid ){
+        if( m_ishost ){
+            m_roomdialog->setHostPlayByCpu( true );
+        }else{
+            m_roomdialog->setPlayerPlayByCpu( true );
+        }
+    }else{
+        if( m_ishost ){
+            m_roomdialog->setPlayerPlayByCpu( true );
+        }else{
+            m_roomdialog->setHostPlayByCpu( true );
+        }
+    }
+}
+
+void CKernel::slot_dealaiend(unsigned int lSendIP, char *buf, int nlen)
+{
+    //拆包
+    STRU_FIL_RQ * rq = (STRU_FIL_RQ *)buf;
+    //查看身份
+    //rq->zoneid; // 根据专区 看房间
+    //rq->roomid; // 根据房间看ui
+    if( m_id == rq->userid ){
+        if( m_ishost ){
+            m_roomdialog->setHostPlayByCpu( false );
+        }else{
+            m_roomdialog->setPlayerPlayByCpu( false );
+        }
+    }else{
+        if( m_ishost ){
+            m_roomdialog->setPlayerPlayByCpu( false );
+        }else{
+            m_roomdialog->setHostPlayByCpu( false );
+        }
+    }
+}
+
+void CKernel::slot_roominfozone()
+{
+    STRU_ZONE_INFO_RQ rq;
+    rq.zoneid = m_zoneid;
+    sendData((char*)&rq,sizeof(rq));
+}
+
+void CKernel::slot_sendrecordrq()
+{
+    STRU_FIL_ALLRECORD_RQ rq;
+    rq.userid = m_id;
+    sendData((char*)&rq,sizeof(rq));
+}
+
+void CKernel::slot_sendsinglerecordrq(QString time)
+{
+    STRU_FIL_SINGLERECORD_RQ rq;
+    sprintf_s(rq.time,time.toStdString().c_str());
+    rq.userid = m_id;
+    sendData((char*)&rq,sizeof(rq));
+}
+
+void CKernel::slot_deal_allrecordrs(unsigned int lSendIP, char *buf, int nlen)
+{
+    STRU_FIL_ALLRECORD_RS* rs = (STRU_FIL_ALLRECORD_RS*)buf;
+
+    m_fiveinlinezone->addrecord(QString(rs->c_time),QString(rs->hostid),QString(rs->playerid));
+}
+
+void CKernel::slot_deal_singlerecordrs(unsigned int lSendIP, char *buf, int nlen)
+{
+    STRU_FIL_SINGLERECORD_RS* rs = (STRU_FIL_SINGLERECORD_RS*)buf;
+    if(rs->result)
+    {
+        m_roomdialog->show();
+        m_roomdialog->setrecordstatus(QString(rs->hostname),QString(rs->playername),rs->hostid,rs->playerid);
+        m_fiveinlinezone->hide();
+        m_fiveinlinezone->hidelist();
+
+    }
+    else
+       QMessageBox::information(nullptr, "提示", "对局数据异常，暂不支持查看");
+
+
+}
+
+void CKernel::slot_reshowwindow()
+{
+    m_fiveinlinezone->show();
+}
+
+void CKernel::slot_dealzoneroominfo(unsigned int lSendIP, char *buf, int nlen)
+{
+    STRU_ZONE_ROOM_INFO * rq = (STRU_ZONE_ROOM_INFO*)buf;
+    std::vector<roomitem*>&vec = m_fiveinlinezone->getvecroomitem();
+    for(int i=1;i<DEF_ZONE_ROOM_COUNT;i++)
+    {
+        vec[i]->setroomitem(rq->roomInfo[i]);
+    }
+}

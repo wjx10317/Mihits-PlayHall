@@ -1,0 +1,45 @@
+# C++ 编译产物
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# Qt 生成文件
+moc_*.cpp
+moc_*.h
+ui_*.h
+qrc_*.cpp
+*.qm
+
+# Qt Creator
+*.pro.user
+*.pro.user.*
+CMakeLists.txt.user
+
+# 构建目录
+build/
+debug/
+release/
+Build/
+
+# IDE 和编辑器
+.vscode/
+.idea/
+*.swp
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 依赖和临时文件
+Makefile
+.qmake.stash
+
+# 游戏封面资源（未在项目中引用，体积大）
+arcade/
