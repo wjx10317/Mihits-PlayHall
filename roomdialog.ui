@@ -246,6 +246,38 @@
     <bool>true</bool>
    </property>
   </widget>
+  <widget class="QLabel" name="lb_ai_best1">
+   <property name="geometry">
+    <rect>
+     <x>610</x>
+     <y>300</y>
+     <width>180</width>
+     <height>30</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>AI一选: </string>
+   </property>
+   <property name="styleSheet">
+    <string>color: rgb(0, 0, 255); font-weight: bold;</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="lb_ai_best2">
+   <property name="geometry">
+    <rect>
+     <x>610</x>
+     <y>340</y>
+     <width>180</width>
+     <height>30</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>AI二选: </string>
+   </property>
+   <property name="styleSheet">
+    <string>color: rgb(0, 128, 0); font-weight: bold;</string>
+   </property>
+  </widget>
  </widget>
  <customwidgets>
   <customwidget>

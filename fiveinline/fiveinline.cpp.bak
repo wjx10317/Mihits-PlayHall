@@ -7,7 +7,7 @@ FiveInLine::FiveInLine(QWidget *parent)
     : QWidget(parent),
       ui(new Ui::FiveInLine),m_board(FIL_ROWS,std::vector<int>(FIL_COLS,2/*2表示无*/)),
       m_movePoint(0,0),m_isMove_fl(false),m_turns(0),isOver(false),m_status(Black),iswaitexist(false),waittoplacestep(QPair<int,int>(-1,-1)),m_cpucolor(None),
-      m_lastPos(0,0),m_isSpectating(false)
+      m_lastPos(0,0)
 {
     ui->setupUi(this);
     m_pieceColor[Black] = QBrush(QColor(0,0,0));
@@ -16,8 +16,6 @@ FiveInLine::FiveInLine(QWidget *parent)
     //connect(this,SIGNAL(SIG_PIECEDOWN(int,int,int)),this,SLOT(slot_piecedown(int,int,int)));
     connect(&m_timer,SIGNAL(timeout()),this,SLOT(repaint()));
     m_timer.start(1000/25);
-    // AI评估防抖定时器：300ms内的多次请求合并为一次
-    connect(&m_aiDebounceTimer, SIGNAL(timeout()), this, SLOT(slot_notifyAIBestMoves()));
     clear();
     //slot_startgame();
     initaivector();
@@ -89,29 +87,6 @@ void FiveInLine::paintEvent(QPaintEvent *event)
        painer.drawLine( QPoint(x2 , y2) , QPoint(x4 , y4));
        painer.drawLine( QPoint(x3 , y3) , QPoint(x4 , y4));
    }
-
-   //绘制AI推荐位置（非填充圆）
-   QPen aiPen;
-   aiPen.setWidth(3);
-   if(m_aiBest1Pos.x()!=-1&&m_aiBest1Pos.y()!=-1)
-   {
-       aiPen.setColor(QColor(255, 50, 50)); // 红色 — AI首选
-       painer.setPen(aiPen);
-       painer.setBrush(Qt::NoBrush);
-       int cx = FIL_MARGIN_WIDTH + FIL_SPACE * (m_aiBest1Pos.x() + 1);
-       int cy = FIL_MARGIN_HEIGHT + FIL_SPACE * (m_aiBest1Pos.y() + 1);
-       painer.drawEllipse(QPoint(cx, cy), FIL_PIECE_SIZE/2 + 2, FIL_PIECE_SIZE/2 + 2);
-   }
-   if(m_aiBest2Pos.x()!=-1&&m_aiBest2Pos.y()!=-1)
-   {
-       aiPen.setColor(QColor(50, 150, 255)); // 蓝色 — AI次选
-       painer.setPen(aiPen);
-       painer.setBrush(Qt::NoBrush);
-       int cx = FIL_MARGIN_WIDTH + FIL_SPACE * (m_aiBest2Pos.x() + 1);
-       int cy = FIL_MARGIN_HEIGHT + FIL_SPACE * (m_aiBest2Pos.y() + 1);
-       painer.drawEllipse(QPoint(cx, cy), FIL_PIECE_SIZE/2 + 2, FIL_PIECE_SIZE/2 + 2);
-   }
-   painer.setPen(Qt::NoPen); // 恢复默认
 
    //绘制移动
    if(m_isMove_fl)
@@ -266,8 +241,8 @@ void FiveInLine::slot_piecedown(int turns, int x, int y)
 
 
         // 自动触发AI评估（局势已变化）
-       notifyAIBestMoves();
-    }
+        notifyAIBestMoves();
+
 
 }
 
@@ -333,10 +308,6 @@ void FiveInLine::clear()
     m_cpucolor =None;
     m_lastPos = QPoint(); // 重置最后一步位置
     m_everyStepPos.clear(); // 清空步骤列表
-    m_isSpectating = false; // 重置观战标志
-    m_aiDebounceTimer.stop(); // 停止防抖定时器
-    m_aiBest1Pos = QPoint(-1, -1); m_aiBest1Valid = false;   // 清除AI推荐
-    m_aiBest2Pos = QPoint(-1, -1); m_aiBest2Valid = false;
     for(int i=0;i<m_vecwin.size();i++)
     {
         m_vecwin[i].clear();
@@ -347,8 +318,6 @@ void FiveInLine::clear()
             m_board[x][y] = None;
         }
     }
-    PlacedStep.clear();
-    NotPlacedStep.clear();
 }
 void FiveInLine::setselfstatus(int _status)
 {
@@ -520,6 +489,9 @@ void FiveInLine::on_left_clicked()
         QPair<int,int>tmp = PlacedStep.top();
         NotPlacedStep.push(tmp);
         releasepiece(tmp);
+    // 自动触发AI评估（局势已变化）
+    notifyAIBestMoves();
+
         PlacedStep.pop();
     }
 }
@@ -529,7 +501,8 @@ void FiveInLine::on_max_left_clicked()
 {
     while(!PlacedStep.empty())
     {
-        notifyAIBestMoves();
+    // 自动触发AI评估（局势已变化）
+    notifyAIBestMoves();
 
         QPair<int,int>tmp = PlacedStep.top();
         NotPlacedStep.push(tmp);
@@ -575,39 +548,14 @@ void FiveInLine::releasepiece(QPair<int, int>tmp)
 {
     m_board[tmp.first][tmp.second] = None;
     m_curturns--;
-
-    // 同步 m_everyStepPos 和 m_lastPos
-    if(!m_everyStepPos.empty())
-    {
-        m_everyStepPos.pop_back();
-    }
-    if(!m_everyStepPos.empty())
-    {
-        m_lastPos = QPoint(m_everyStepPos.back().first, m_everyStepPos.back().second);
-    }
-    else
-    {
-        m_lastPos = QPoint();
-    }
-    notifyAIBestMoves();
-
 }
 void FiveInLine::reloadpiece(QPair<int, int>tmp)
 {
     m_board[tmp.first][tmp.second] = m_curturns%2;
     m_curturns++;
-
-    // 同步 m_everyStepPos 和 m_lastPos
-    m_everyStepPos.push_back(std::pair<int,int>(tmp.first, tmp.second));
-    m_lastPos = QPoint(tmp.first, tmp.second);
-
+    // 自动触发AI评估（局势已变化）
     notifyAIBestMoves();
 
-}
-
-void FiveInLine::setSpectating(bool spectating)
-{
-    m_isSpectating = spectating;
 }
 
 bool FiveInLine::isWin(int x, int y, std::vector<std::vector<int> > &board)
@@ -658,8 +606,7 @@ int FiveInLine::minmax(std::vector<std::vector<int>> &copyBoard, std::vector<std
                        , int depth, int alpha, int beta, bool isMaximizing, int player)
 {
     if( depth == 0 ) {
-        int score = evaluateBoard(copyBoard);          // white - black
-        return (player % 2 ==0)? -score : score;
+       return evaluateBoard(copyBoard);
     }
     int bestValue = isMaximizing ? INT_MIN : INT_MAX;
     int opponent = ( player%2 == Black )? White:Black;
@@ -809,11 +756,6 @@ void FiveInLine::findBestMove(int &bestX, int &bestY, int player, int depth)
     int bestValue = INT_MIN;
     bestX = -1;
     bestY = -1;
-    if(m_everyStepPos.empty())
-    {
-        bestX = 7;
-        bestY = 8;
-    }
 
     std::vector<std::pair<int, int>> candidates;
     std::vector<std::pair<int, int>> copyEveryStep = m_everyStepPos;
@@ -911,32 +853,25 @@ void FiveInLine::getTopNMoves(int n, int player, std::vector<std::pair<int, int>
         int x = pos.first;
         int y = pos.second;
 
-        // 1. 检查玩家在此落子是否获胜
+        // 尝试落子
         copyBoard[x][y] = player%2;
-        if(isWin( x, y , copyBoard )){
-            scoredMoves.push_back({1000001, {x, y}});
+
+        // 检查是否获胜
+        bool win = isWin( x, y , copyBoard );
+        if(win){
+            scoredMoves.push_back({1000000, {x, y}});
             copyBoard[x][y] = None;
             continue;
         }
 
-        // 2. 检查对手在此落子是否获胜（防守必堵点）
-        int opponent = (player%2 == Black) ? White : Black;
-        copyBoard[x][y] = opponent;
-        if(isWin( x, y , copyBoard ))
-        {
-            scoredMoves.push_back({1000001, {x, y}});
-            copyBoard[x][y] = None;
-            continue;
-        }
-        // 恢复为玩家落子，后续minimax基于玩家已落子的棋盘
-        copyBoard[x][y] = player%2;
-
-        // 3. minimax评估（基于玩家已落子的正确棋盘）
+        // 使用minimax评估
         copyEveryStep.push_back({x, y});
         int score = minmax(copyBoard, copyEveryStep, MAX_DEPTH - 1, INT_MIN, INT_MAX, false, player);
+        scoredMoves.push_back({score, {x, y}});
+
+        // 撤销
         copyBoard[x][y] = None;
         copyEveryStep.pop_back();
-        scoredMoves.push_back({score, {x, y}});
     }
 
     // 按分数排序（降序）
@@ -954,66 +889,21 @@ void FiveInLine::getTopNMoves(int n, int player, std::vector<std::pair<int, int>
     }
 }
 
-// 请求AI评估（防抖：多次快速调用合并为一次，300ms后执行）
-// 非观战/回看模式不触发评估（玩家不需要看到AI推荐）
+// 自动触发AI评估并发送信号
 void FiveInLine::notifyAIBestMoves()
 {
-    if(!m_isSpectating) return;
-    m_aiDebounceTimer.start(300);
-}
-
-// 防抖后真正执行AI评估并发送信号
-void FiveInLine::slot_notifyAIBestMoves()
-{
-    m_aiDebounceTimer.stop();
-    if(!m_isSpectating) return;
-
-    // 获取下一步的玩家（m_curturns 已落子数，%2 即为下一步颜色）
-    int nextPlayer = m_curturns % 2;
-
+    // 如果游戏已结束，不评估
+    if(isOver) return;
+    
+    // 获取下一步的玩家
+    int nextPlayer = (m_turns % 2 == Black) ? White : Black;
+    
     // 获取AI推荐的前2个最佳位置
     std::vector<std::pair<int,int>> topMoves;
     std::vector<int> scores;
     getTopNMoves(2, nextPlayer, topMoves, scores);
-
-    // 提取前2个最佳位置（如果没有，坐标设为哨兵值-1）
-    int best1_x = -1, best1_y = -1, best1_score = 0;
-    int best2_x = -1, best2_y = -1, best2_score = 0;
-
-    if(topMoves.size() >= 1 && topMoves[0].first!=-1 && topMoves[0].second!=-1)
-    {
-        best1_x = topMoves[0].first;
-        best1_y = topMoves[0].second;
-        best1_score = scores[0];
-        m_aiBest1Pos = QPoint(best1_x, best1_y);
-    }
-    else
-    {
-        m_aiBest1Pos = QPoint(-1, -1);
-
-    }
-
-    if(topMoves.size() >= 2 && topMoves[1].first!=-1 && topMoves[1].second!=-1)
-    {
-        best2_x = topMoves[1].first;
-        best2_y = topMoves[1].second;
-        best2_score = scores[1];
-        m_aiBest2Pos = QPoint(best2_x, best2_y);
-
-    }
-    else
-    {
-        m_aiBest2Pos = QPoint(-1, -1);
-
-    }
-
-    if(m_everyStepPos.empty())
-    {
-        best1_x = 7;
-        best1_y = 7;
-        best1_score = 1;
-    }
-    // 发送信号给上层（使用简单类型）
-    emit SIG_AI_BEST_MOVES(nextPlayer, best1_x, best1_y, best1_score, best2_x, best2_y, best2_score);
+    
+    // 发送信号给上层
+    emit SIG_AI_BEST_MOVES(nextPlayer, topMoves, scores);
 }
 

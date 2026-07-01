@@ -12,6 +12,9 @@ roomDialog::roomDialog(QWidget *parent) :
     connect(ui->widget,SIGNAL(SIG_PIECEDOWN(int ,int,int)),this,SIGNAL(SIG_PIECEDOWN(int ,int,int)));
     connect(ui->widget,SIGNAL(SIG_PLAYERWIN(int)),
             this,SLOT(slot_judgewin(int)));
+    // 连接AI最佳位置信号
+    connect(ui->widget,SIGNAL(SIG_AI_BEST_MOVES(int,int,int,int,int,int,int)),
+            this,SLOT(slot_updateAIBestMoves(int,int,int,int,int,int,int)));
 }
 
 roomDialog::~roomDialog()
@@ -50,7 +53,12 @@ void roomDialog::setUserStatus(int status)
     m_status = status;
 //需要修改
     ui->widget->setselfstatus( m_status == _host?FiveInLine::Black:FiveInLine::White );
+    ui->widget->setSpectating( m_status == _spec );
 
+    // 玩家身份进入时隐藏AI推荐标签，观战时显示
+    bool isSpectator = (m_status == _spec);
+    ui->lb_ai_best1->setVisible(isSpectator);
+    ui->lb_ai_best2->setVisible(isSpectator);
 }
 
 void roomDialog::closeEvent(QCloseEvent *event)
@@ -59,12 +67,12 @@ void roomDialog::closeEvent(QCloseEvent *event)
                           == QMessageBox::Yes ){
         clear_pushbutton();
         if(!record_flag)
-        Q_EMIT SIG_CLOSE();
+        emit SIG_CLOSE();
         else
         {
 
             record_flag = false;
-            Q_EMIT SIG_SHOWBACK();
+            emit SIG_SHOWBACK();
         }
         event->accept();
     }else{
@@ -94,6 +102,9 @@ void roomDialog::clearroom()
     ui->pb_player1_cpu->setText("待托管");
     ui->pb_player2_cpu->setText("待托管");
     ui->widget->clear();
+    // 重置时隐藏AI推荐
+    ui->lb_ai_best1->setVisible(false);
+    ui->lb_ai_best2->setVisible(false);
     //聊天窗口清空
 
     //后台数据
@@ -193,6 +204,34 @@ void roomDialog::slot_piecedown(int color, int x, int y)
     ui->widget->slot_piecedown(color,x,y);
 }
 
+void roomDialog::slot_updateAIBestMoves(int nextPlayer, int best1_x, int best1_y, int best1_score,
+                                            int best2_x, int best2_y, int best2_score)
+{
+    // 只有在回放模式下才显示AI推荐
+    if(m_status != _spec)
+        return;
+
+    // 显示AI首选位置
+    QString playerColor = (nextPlayer == FiveInLine::Black) ? "黑棋" : "白棋";
+    QString best1 = QString("AI推荐%1: (%2,%3) 分数:%4")
+                    .arg(playerColor)
+                    .arg(best1_x).arg(best1_y).arg(best1_score);
+    ui->lb_ai_best1->setText(best1);
+
+    // 显示AI次选位置（用哨兵坐标判断是否有次选，而非分数）
+    if(best2_x != -1 || best2_y != -1)
+    {
+        QString best2 = QString("AI推荐%1: (%2,%3) 分数:%4")
+                        .arg(playerColor)
+                        .arg(best2_x).arg(best2_y).arg(best2_score);
+        ui->lb_ai_best2->setText(best2);
+    }
+    else
+    {
+        ui->lb_ai_best2->setText("AI次选: 无");
+    }
+}
+
 void roomDialog::slot_judgewin(int color)
 {
     QString res;
@@ -229,10 +268,10 @@ void roomDialog::on_pb_player1_ready_clicked(bool checked)
     if( ui->pb_player1_ready->isChecked() ){
 
         //发送信号
-        Q_EMIT SIG_gameReady( 0x10 , m_roomid , (*it).first  );
+        emit SIG_gameReady( 0x10 , m_roomid , (*it).first  );
     }else{
 
-        Q_EMIT SIG_gamenotReady( 0x10 , m_roomid , (*it).first  );
+        emit SIG_gamenotReady( 0x10 , m_roomid , (*it).first  );
     }
 }
 
@@ -243,15 +282,15 @@ void roomDialog::on_pb_player2_ready_clicked(bool checked)
     it++;
     if( ui->pb_player2_ready->isChecked() ){
         //发送信号
-        Q_EMIT SIG_gameReady( 0x10 , m_roomid , (*it).first );
+        emit SIG_gameReady( 0x10 , m_roomid , (*it).first );
     }else{
-        Q_EMIT SIG_gamenotReady( 0x10 , m_roomid , (*it).first );
+        emit SIG_gamenotReady( 0x10 , m_roomid , (*it).first );
     }
 }
 
 void roomDialog::on_pb_begin_clicked()
 {
-    Q_EMIT SIG_gameStart(0x10,m_roomid);
+    emit SIG_gameStart(0x10,m_roomid);
 }
 
 void roomDialog::on_pb_player1_cpu_clicked(bool checked)
@@ -262,7 +301,7 @@ void roomDialog::on_pb_player1_cpu_clicked(bool checked)
 
         if(ui->pb_player1_cpu->isChecked())
         {
-            Q_EMIT SIG_PLAYBYCPUBEGIN(0x10,m_roomid,(*it).first);
+            emit SIG_PLAYBYCPUBEGIN(0x10,m_roomid,(*it).first);
 
             ui->widget->setcpucolor(FiveInLine::Black);
 
@@ -270,7 +309,7 @@ void roomDialog::on_pb_player1_cpu_clicked(bool checked)
         }
         else
         {
-            Q_EMIT SIG_PLAYBYCPUEND(0x10,m_roomid,(*it).first);
+            emit SIG_PLAYBYCPUEND(0x10,m_roomid,(*it).first);
             ui->widget->setcpucolor(FiveInLine::None);
         }
     }
@@ -284,7 +323,7 @@ void roomDialog::on_pb_player2_cpu_clicked(bool checked)
         it++;
         if(ui->pb_player2_cpu->isChecked())
         {
-            Q_EMIT SIG_PLAYBYCPUBEGIN(0x10,m_roomid,(*it).first);
+            emit SIG_PLAYBYCPUBEGIN(0x10,m_roomid,(*it).first);
 
             ui->widget->setcpucolor(FiveInLine::White);
 
@@ -292,7 +331,7 @@ void roomDialog::on_pb_player2_cpu_clicked(bool checked)
         }
         else
         {
-            Q_EMIT SIG_PLAYBYCPUEND(0x10,m_roomid,(*it).first);
+            emit SIG_PLAYBYCPUEND(0x10,m_roomid,(*it).first);
             ui->widget->setcpucolor(FiveInLine::None);
         }
     }
@@ -352,6 +391,11 @@ void roomDialog::setrecordstatus(QString a, QString b ,int c,int d)
     setPlayerInfo(d,b);
     record_flag = true;
     m_status = _spec;
+    ui->widget->clear();
+    ui->widget->setSpectating(true);
+    // 回看模式显示AI推荐
+    ui->lb_ai_best1->setVisible(true);
+    ui->lb_ai_best2->setVisible(true);
 }
 
 void roomDialog::addmem(int id,QString name)

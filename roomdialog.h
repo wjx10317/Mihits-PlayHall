@@ -64,6 +64,8 @@ private slots:
 public slots:
     void slot_piecedown(int,int,int);
     void slot_judgewin(int color);
+    void slot_updateAIBestMoves(int nextPlayer, int best1_x, int best1_y, int best1_score,
+                                int best2_x, int best2_y, int best2_score);
 
 private:
     Ui::roomDialog *ui;

@@ -68,6 +68,9 @@ public slots:
 
 
     void slot_dealzoneroominfo(unsigned int lSendIP, char *buf, int nlen);
+    // Phase1: 心跳 + 断线处理
+    void slot_sendHeartbeat();
+    void slot_disConnect();
 public:
     void sendData(  char*  , int  );
     void setnetpackmap();
@@ -90,6 +93,9 @@ public:
     char m_serverIP[20];
     bool m_ishost;
     QTimer m_rqtimer;
+    // Phase1: 心跳
+    QTimer m_heartbeatTimer;
+    char m_reconnectToken[_MAX_SIZE];
 
 
 signals:

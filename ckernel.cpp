@@ -94,6 +94,9 @@ CKernel::CKernel(QObject *parent):
     connect(m_fiveinlinezone,SIGNAL(SIG_ALLRECORD()),this,SLOT(slot_sendrecordrq()));
     connect(m_fiveinlinezone,SIGNAL(SIG_SINGLERECORD(QString)),this,SLOT(slot_sendsinglerecordrq(QString)));
     connect(m_roomdialog,SIGNAL(SIG_SHOWBACK()),this,SLOT(slot_reshowwindow()));
+    // Phase1: 心跳 + 断线检测
+    connect(&m_heartbeatTimer, SIGNAL(timeout()), this, SLOT(slot_sendHeartbeat()));
+    connect(m_client, SIGNAL(SIG_disConnect()), this, SLOT(slot_disConnect()));
     setnetpackmap();
 
 }
@@ -204,7 +207,9 @@ void CKernel::slot_loginRs(unsigned int lSendIP , char* buf , int nlen)
         m_dialog->show();
         m_id = rs.userid;
         m_username = QString::fromStdString(rs.name);
-
+        strcpy(m_reconnectToken, rs.token);
+        // 启动心跳（每 5 秒发一次）
+        m_heartbeatTimer.start(5000);
         break;
         default:
         QMessageBox::about(this->m_logindialog,"提示","登录异常");
@@ -566,6 +571,7 @@ void CKernel::slot_deal_singlerecordrs(unsigned int lSendIP, char *buf, int nlen
         m_fiveinlinezone->hide();
         m_fiveinlinezone->hidelist();
 
+
     }
     else
        QMessageBox::information(nullptr, "提示", "对局数据异常，暂不支持查看");
@@ -585,5 +591,57 @@ void CKernel::slot_dealzoneroominfo(unsigned int lSendIP, char *buf, int nlen)
     for(int i=1;i<DEF_ZONE_ROOM_COUNT;i++)
     {
         vec[i]->setroomitem(rq->roomInfo[i]);
+    }
+}
+
+// ============================================================
+// Phase1: 心跳 + 断线处理
+// ============================================================
+void CKernel::slot_sendHeartbeat()
+{
+    if (m_id == 0) return;  // 未登录
+    STRU_FIL_HEARTBEAT hb;
+    hb.userid = m_id;
+    hb.zoneid = m_zoneid;
+    hb.roomid = m_roomid;
+    //sendData((char*)&hb, sizeof(hb));
+}
+
+void CKernel::slot_disConnect()
+{
+    // 停止心跳，避免向死连接发包
+    m_heartbeatTimer.stop();
+
+    // 弹窗提示
+    QMessageBox msg;
+    msg.setWindowTitle("连接断开");
+    msg.setText("与服务器的连接已断开，是否尝试重连？");
+    msg.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    msg.setDefaultButton(QMessageBox::Yes);
+
+    if (msg.exec() == QMessageBox::Yes)
+    {
+        // 重建 TCP 连接
+        m_client->CloseNet();
+        // 重新 OpenNet，用缓存的服务器 IP 和端口
+        if (m_client->OpenNet(m_serverIP, _DEF_TCP_PORT))
+        {
+            // 重连成功，发重连请求
+            STRU_FIL_RECONNECT_RQ rq;
+            rq.userid = m_id;
+            strcpy(rq.token, m_reconnectToken);
+            sendData((char*)&rq, sizeof(rq));
+            // 重新启动心跳
+            m_heartbeatTimer.start(5000);
+        }
+        else
+        {
+            QMessageBox::warning(nullptr, "重连失败", "无法连接到服务器，请重启程序");
+            exit(0);
+        }
+    }
+    else
+    {
+        exit(0);
     }
 }
