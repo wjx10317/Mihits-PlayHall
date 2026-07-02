@@ -293,7 +293,7 @@ void roomDialog::on_pb_begin_clicked()
     emit SIG_gameStart(0x10,m_roomid);
 }
 
-void roomDialog::on_pb_player1_cpu_clicked(bool checked)
+void roomDialog::on_pb_player1_cpu_clicked(bool )
 {
     if(m_status ==_host)
     {
@@ -315,7 +315,7 @@ void roomDialog::on_pb_player1_cpu_clicked(bool checked)
     }
 }
 
-void roomDialog::on_pb_player2_cpu_clicked(bool checked)
+void roomDialog::on_pb_player2_cpu_clicked(bool )
 {
     if(m_status ==_player)
     {

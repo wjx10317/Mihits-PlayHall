@@ -281,6 +281,10 @@ struct STRU_FIL_SINGLERECORD_RS
 // ============================================================
 // 断线重连相关协议
 // ============================================================
+#define _DEF_HEARTBEAT_INTERVAL_MS      5000    // 客户端发送间隔
+#define _DEF_HEARTBEAT_TIMEOUT_SEC        60      // 服务端超时未收到则硬离线
+#define _DEF_HEARTBEAT_CHECK_INTERVAL_SEC 10      // 服务端扫描周期
+
 // 心跳
 #define DEF_FIL_HEARTBEAT               (_DEF_PACK_BASE + 25)
 // 重连
@@ -290,7 +294,7 @@ struct STRU_FIL_SINGLERECORD_RS
 #define DEF_FIL_OPPONENT_DISCONNECT     (_DEF_PACK_BASE + 28)
 
 // ========== 心跳包 ==========
-// 客户端每 5s 发一次，纯保活，无需回复
+// 客户端每 _DEF_HEARTBEAT_INTERVAL_MS 发一次，纯保活，无需回复
 typedef struct STRU_FIL_HEARTBEAT
 {
     STRU_FIL_HEARTBEAT():type(DEF_FIL_HEARTBEAT),userid(0),zoneid(0),roomid(0)
@@ -322,15 +326,12 @@ typedef struct STRU_FIL_RECONNECT_RS
 {
     STRU_FIL_RECONNECT_RS():type(DEF_FIL_RECONNECT_RS),
         result(0),zoneid(0),roomid(0),inGame(0)
-    {
-        memset(gameSnapshot,0,sizeof(gameSnapshot));
-    }
+    {}
     PackType type;
     int  result;                // 0=失败 1=成功
     int  zoneid;                // 当前专区（0=不在专区）
     int  roomid;                // 当前房间（0=不在房间）
-    int  inGame;                // 0=未开局 1=对局中
-    char gameSnapshot[4096];    // 棋局快照 JSON（inGame=1 时有效）
+    int  inGame;                // 0=未开局 1=对局中（对局中由服务端逐条重放 PIECEDOWN）
 }STRU_FIL_RECONNECT_RS;
 
 // ========== 对手掉线通知 ==========

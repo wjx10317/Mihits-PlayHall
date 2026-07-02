@@ -44,4 +44,4 @@ DISTFILES += \
     src/makefile
 INCLUDEPATH += ./include
 
-LIBS += -lpthread -lmysqlclient
+LIBS += -lpthread -lmysqlclient -lbcrypt

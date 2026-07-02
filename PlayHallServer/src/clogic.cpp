@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonValue>
 #include<QDebug>
+#include"bcrypt/BCrypt.hpp"
 void CLogic::setNetPackMap()
 {
     NetPackMap(_DEF_PACK_REGISTER_RQ)    = &CLogic::RegisterRq;
@@ -25,8 +26,7 @@ void CLogic::setNetPackMap()
     NetPackMap(DEF_FIL_ALLRECORD_RQ)     = &CLogic::FIL_AllRecordRq;
     NetPackMap(DEF_FIL_SINGLERECORD_RQ)     = &CLogic::FIL_SingleRecordRq;
     NetPackMap(DEF_FIL_HEARTBEAT)          = &CLogic::HeartBeatRq;
-
-
+    NetPackMap(DEF_FIL_RECONNECT_RQ)       = &CLogic::ReconnectRq;
 
 }
 
@@ -68,8 +68,9 @@ void CLogic::RegisterRq(sock_fd clientfd,char* szbuf,int nlen)
         else
         {
             rs.result = register_success;
+            string bcstr = getbcrypt(rq->password, 10);
             sprintf(szsql,"insert into t_user(tel,password,name)values('%s','%s','%s')"
-                    ,rq->tel,rq->password,rq->name);
+                    ,rq->tel,bcstr,rq->name);
             if(!m_sql->UpdataMysql(szsql))
             {
                 printf("update fail:%s,%s\n",szsql);           
@@ -111,7 +112,7 @@ void CLogic::LoginRq(sock_fd clientfd ,char* szbuf,int nlen)
         result.pop_front();
         string name = result.front();
         result.pop_front();
-        if(strcmp(password.c_str(),rq->password)!=0)
+        if(!comparebcrypt(rq->password,password))
         {
             rs.result = password_error;
         }
@@ -123,6 +124,14 @@ void CLogic::LoginRq(sock_fd clientfd ,char* szbuf,int nlen)
             USER_INFO * info = nullptr;
             if(m_mapfdtouserinfo.find(id,info))
             {
+                sock_fd old_fd = info->m_sockfd;
+                pthread_mutex_lock(&m_fdLock);
+                if (IS_ONLINE_SOCKFD(old_fd))
+                    m_fdToUserid.erase(old_fd);
+                pthread_mutex_unlock(&m_fdLock);
+                if (IS_ONLINE_SOCKFD(old_fd) && old_fd != clientfd)
+                    m_tcp->CloseFd(old_fd, false);
+
                 m_mapfdtouserinfo.erase(id);
                 delete info;
                 info =nullptr;
@@ -237,6 +246,7 @@ void CLogic::JoinRoomRq(sock_fd clientfd, char *szbuf, int nlen)
     USER_INFO* info =nullptr;
     if(!m_mapfdtouserinfo.find(loginid,info))
         return ;
+    info->m_roomid = rq->roomid;
 
     STRU_ROOM_MENBER loginrq;
     loginrq.status = rs.status;
@@ -253,6 +263,8 @@ void CLogic::JoinRoomRq(sock_fd clientfd, char *szbuf, int nlen)
             USER_INFO* meminfo = nullptr;
             if(!m_mapfdtouserinfo.find(curid,meminfo))
                 return;
+            if (!IS_ONLINE_SOCKFD(meminfo->m_sockfd))
+                continue;
 
             STRU_ROOM_MENBER memrq;
             memrq.userid = curid;
@@ -304,6 +316,8 @@ void CLogic::LeaveRoomRq(sock_fd clientfd, char *szbuf, int nlen)
             USER_INFO* info =nullptr;
             if(!m_mapfdtouserinfo.find(*ite,info))
                 continue;
+            if (!IS_ONLINE_SOCKFD(info->m_sockfd))
+                continue;
             SendData(info->m_sockfd,szbuf,nlen);
         }
         else
@@ -314,6 +328,9 @@ void CLogic::LeaveRoomRq(sock_fd clientfd, char *szbuf, int nlen)
     pthread_mutex_lock(&m_roomListlock);
     usrlst.erase(it);
     pthread_mutex_unlock(&m_roomListlock);
+    USER_INFO* info = nullptr;
+    if (m_mapfdtouserinfo.find(id, info))
+        info->m_roomid = 0;
 }
 void CLogic::FIL_MsgSendRq(sock_fd clientfd, char *szbuf, int nlen)
 {
@@ -329,6 +346,7 @@ void CLogic::FIL_MsgSendRq(sock_fd clientfd, char *szbuf, int nlen)
             int userid = *ite;
             USER_INFO* info = nullptr;
             if( !m_mapfdtouserinfo.find(userid , info ) ) continue;
+            if( !IS_ONLINE_SOCKFD(info->m_sockfd) ) continue;
             SendData( info->m_sockfd , szbuf, nlen );
         }
 
@@ -348,6 +366,7 @@ _DEF_COUT_FUNC_
         int userid = *ite;
         USER_INFO* info = nullptr;
         if( !m_mapfdtouserinfo.find(userid , info ) ) continue;
+        if( !IS_ONLINE_SOCKFD(info->m_sockfd) ) continue;
         SendData( info->m_sockfd , szbuf, nlen );
     }
     int roomid = rq->roomid;
@@ -558,6 +577,152 @@ void CLogic::FIL_SingleRecordRq(sock_fd clientfd, char *szbuf, int nlen)
        }
 }
 // ============================================================
+// 断线重连
+// ============================================================
+void CLogic::ReconnectRq(sock_fd clientfd, char *szbuf, int nlen)
+{
+    STRU_FIL_RECONNECT_RQ* rq = (STRU_FIL_RECONNECT_RQ*)szbuf;
+    STRU_FIL_RECONNECT_RS rs;
+
+    USER_INFO* info = nullptr;
+    if (!m_mapfdtouserinfo.find(rq->userid, info))
+    {
+        rs.result = 0;
+        SendData(clientfd, (char*)&rs, sizeof(rs));
+        return;
+    }
+    if (strcmp(info->m_token, rq->token) != 0)
+    {
+        rs.result = 0;
+        SendData(clientfd, (char*)&rs, sizeof(rs));
+        return;
+    }
+
+    sock_fd old_fd = info->m_sockfd;
+    if (IS_ONLINE_SOCKFD(old_fd) && old_fd != clientfd)
+    {
+        pthread_mutex_lock(&m_fdLock);
+        m_fdToUserid.erase(old_fd);
+        pthread_mutex_unlock(&m_fdLock);
+        m_tcp->CloseFd(old_fd, false);
+    }
+    info->m_sockfd = clientfd;
+    pthread_mutex_lock(&m_fdLock);
+    m_fdToUserid[clientfd] = rq->userid;
+    pthread_mutex_unlock(&m_fdLock);
+
+    pthread_mutex_lock(&m_heartbeatLock);
+    m_heartbeatMap[rq->userid] = time(NULL);
+    pthread_mutex_unlock(&m_heartbeatLock);
+
+    int zoneid = info->m_zoneid;
+    int roomid = info->m_roomid;
+    int inGame = 0;
+    pthread_mutex_lock(&m_roomcachelock);
+    if (room_cache.count(roomid) > 0)
+        inGame = 1;
+    pthread_mutex_unlock(&m_roomcachelock);
+
+    rs.result = 1;
+    rs.zoneid = zoneid;
+    rs.roomid = roomid;
+    rs.inGame = inGame;
+    SendData(clientfd, (char*)&rs, sizeof(rs));
+
+    if (roomid <= 0)
+        return;
+
+    pthread_mutex_lock(&m_roomListlock);
+    list<int> tmplist = m_roomList[roomid];
+    pthread_mutex_unlock(&m_roomListlock);
+
+    int reconnectStatus = _spec;
+    int status = -1;
+    for (auto ite = tmplist.begin(); ite != tmplist.end(); ++ite)
+    {
+        if (status < 2)
+            status++;
+        if (*ite == rq->userid)
+        {
+            reconnectStatus = status;
+            break;
+        }
+    }
+
+    status = -1;
+    for (auto ite = tmplist.begin(); ite != tmplist.end(); ++ite)
+    {
+        if (status < 2)
+            status++;
+        int curid = *ite;
+        USER_INFO* meminfo = nullptr;
+        if (!m_mapfdtouserinfo.find(curid, meminfo))
+            continue;
+
+        STRU_ROOM_MENBER memrq;
+        memrq.userid = curid;
+        memrq.status = status;
+        strcpy(memrq.name, meminfo->m_username);
+        SendData(clientfd, (char*)&memrq, sizeof(memrq));
+    }
+
+    STRU_ROOM_MENBER endrq;
+    endrq.userid = -1;
+    SendData(clientfd, (char*)&endrq, sizeof(endrq));
+
+    if (inGame == 0 && reconnectStatus <= _player)
+    {
+        STRU_FIL_RQ notready(DEF_FIL_ROOM_NOTREADY);
+        notready.zoneid = zoneid;
+        notready.roomid = roomid;
+        notready.userid = rq->userid;
+
+        status = -1;
+        for (auto ite = tmplist.begin(); ite != tmplist.end(); ++ite)
+        {
+            if (status < 2)
+                status++;
+            int curid = *ite;
+            if (curid == rq->userid)
+                continue;
+            if (status > _player)
+                continue;
+
+            USER_INFO* meminfo = nullptr;
+            if (!m_mapfdtouserinfo.find(curid, meminfo))
+                continue;
+            if (!IS_ONLINE_SOCKFD(meminfo->m_sockfd))
+                continue;
+            SendData(meminfo->m_sockfd, (char*)&notready, sizeof(notready));
+        }
+    }
+
+    if (inGame == 1)
+    {
+        pthread_mutex_lock(&m_roomcachelock);
+        auto it = room_cache.find(roomid);
+        vector<QPair<int, int>> moves;
+        if (it != room_cache.end())
+            moves = it->second;
+        pthread_mutex_unlock(&m_roomcachelock);
+
+        int step = 0;
+        for (auto& p : moves)
+        {
+            STRU_FIL_PIECEDOWN pd;
+            pd.zoneid = zoneid;
+            pd.roomid = roomid;
+            pd.userid = rq->userid;
+            pd.x = p.first;
+            pd.y = p.second;
+            pd.color = step % 2;
+            SendData(clientfd, (char*)&pd, sizeof(pd));
+            step++;
+        }
+    }
+}
+
+// ============================================================
 // Phase1: 心跳 + 掉线处理
 // ============================================================
 void CLogic::HeartBeatRq(sock_fd clientfd, char *szbuf, int nlen)
@@ -578,7 +743,7 @@ void CLogic::CheckHeartBeat()
     pthread_mutex_lock(&m_heartbeatLock);
     for (auto& kv : m_heartbeatMap)
     {
-        if (now - kv.second > 15)
+        if (now - kv.second > _DEF_HEARTBEAT_TIMEOUT_SEC)
             timeoutUsers.push_back(kv.first);
     }
     pthread_mutex_unlock(&m_heartbeatLock);
@@ -609,11 +774,11 @@ void CLogic::HandleDisconnect(int userid)
     pthread_mutex_unlock(&m_heartbeatLock);
     delete info;
 
-    // 网络层关闭 fd（摘 epoll + close + 清 myevent_s）
-    m_tcp->CloseFd(old_fd);
+    if (IS_ONLINE_SOCKFD(old_fd))
+        m_tcp->CloseFd(old_fd, false);
 }
 
-// 静态回调：recv_task 检测到 fd 自然断开时，清理该用户的业务数据
+// 静态回调：recv_task 检测到 fd 自然断开时，标记用户离线（保留 USER_INFO 供重连）
 void CLogic::OnFdClosed(sock_fd fd)
 {
     CLogic* logic = TcpKernel::GetInstance()->m_logic;
@@ -631,22 +796,23 @@ void CLogic::OnFdClosed(sock_fd fd)
 
     USER_INFO* info = nullptr;
     if (logic->m_mapfdtouserinfo.find(userid, info))
-    {
-        logic->m_mapfdtouserinfo.erase(userid);
-        delete info;
-    }
-
-    pthread_mutex_lock(&logic->m_heartbeatLock);
-    logic->m_heartbeatMap.erase(userid);
-    pthread_mutex_unlock(&logic->m_heartbeatLock);
+        info->m_sockfd = _DEF_OFFLINE_SOCKFD;
+}
+string CLogic::getbcrypt(char* password, int cost)
+{
+    return BCrypt::generateHash(password, cost);
 }
 
+bool CLogic::comparebcrypt(const char* src, const char* dst)
+{
+    return BCrypt::validatePassword(src, dst);
+}
 void* CLogic::HeartBeatThread(void* arg)
 {
     CLogic* pthis = (CLogic*)arg;
     while (!pthis->m_heartbeatStop)
     {
-        sleep(10);  // 每 10 秒检查一次
+        sleep(_DEF_HEARTBEAT_CHECK_INTERVAL_SEC);  // 每 10 秒检查一次
         pthis->CheckHeartBeat();
     }
     return NULL;

@@ -2,6 +2,8 @@
 #define CKERNEL_H
 
 #include <QObject>
+#include <QApplication>
+#include <QKeyEvent>
 #include"dialog.h"
 #include"INetMediator.h"
 #include"logindialog.h"
@@ -26,28 +28,29 @@ public:
 private:
     explicit CKernel(QObject *parent = nullptr);
     ~CKernel(){}
-    CKernel(const CKernel& kernel){}
-    CKernel& operator=(const CKernel& kernel)
+    CKernel(const CKernel&) = delete;
+    CKernel& operator=(const CKernel&)
     {return *this;}
     void ConfigSet();
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 public slots:
     void Des_Instance();
-    void slot_deal_readydata(unsigned int  , char*  , int );
+    void slot_deal_readydata(unsigned int lSendIP, char *buf, int nlen);
     void slot_registerRq(QString ,QString,QString);
     void slot_loginRq(QString ,QString);
-    void slot_registerRs( unsigned int  , char*  , int  );
-    void slot_loginRs( unsigned int  , char*  , int  );
-    void slot_joinzone(int );
+    void slot_registerRs(unsigned int lSendIP, char *buf, int nlen);
+    void slot_loginRs(unsigned int lSendIP, char *buf, int nlen);
+    void slot_joinzone(int);
     void slot_joinroom(int);
     void slot_leavezone();
-    void slot_joinroomrs( unsigned int  , char*  , int  );
-    void slot_roommemberrq( unsigned int  , char*  , int );
-    void slot_leaveroomrq(unsigned int  , char* , int );
+    void slot_joinroomrs(unsigned int lSendIP, char *buf, int nlen);
+    void slot_roommemberrq(unsigned int lSendIP, char *buf, int nlen);
+    void slot_leaveroomrq(unsigned int lSendIP, char *buf, int nlen);
     void slot_leaveroom();
-    void slot_sendgameready(int, int, int);
+    void slot_sendgameready(int zoneid, int roomid, int userid);
     void slot_sendgamenotready(int zoneid, int roomid, int userid);
-    void slot_sendgamestart(int,int);
+    void slot_sendgamestart(int zoneid, int roomid);
     void slot_dealroomstart(unsigned int lSendIP, char *buf, int nlen);
     void slot_dealroomnotready(unsigned int lSendIP, char *buf, int nlen);
     void slot_dealroomready(unsigned int lSendIP, char *buf, int nlen);
@@ -64,15 +67,13 @@ public slots:
     void slot_deal_allrecordrs(unsigned int lSendIP, char *buf, int nlen);
     void slot_deal_singlerecordrs(unsigned int lSendIP, char *buf, int nlen);
     void slot_reshowwindow();
-
-
-
     void slot_dealzoneroominfo(unsigned int lSendIP, char *buf, int nlen);
     // Phase1: 心跳 + 断线处理
     void slot_sendHeartbeat();
     void slot_disConnect();
+    void slot_reconnectRs(unsigned int lSendIP, char *buf, int nlen);
 public:
-    void sendData(  char*  , int  );
+    void sendData(char*,int);
     void setnetpackmap();
 public:
     //窗体成员
@@ -93,10 +94,11 @@ public:
     char m_serverIP[20];
     bool m_ishost;
     QTimer m_rqtimer;
-    // Phase1: 心跳
+
     QTimer m_heartbeatTimer;
     char m_reconnectToken[_MAX_SIZE];
-
+    bool m_reconnecting;
+    bool m_reconnectInGame;
 
 signals:
 

@@ -155,8 +155,9 @@ public:
     void EventLoop();
     //发送数据
     int SendData(int fd, char* szbuf , int nlen );
-    //关闭 fd（epoll 摘除 + close + 清理 myevent_s），供业务层心跳超时调用
-    void CloseFd(sock_fd fd);
+    //关闭 fd：统一 epoll 摘除 + close + 清理 myevent_s
+    // notify=false 时仅做网络清理（业务层已先行处理，如心跳超时）
+    void CloseFd(sock_fd fd, bool notify = true);
     //设置 fd 关闭回调（recv_task 检测到自然断开时调用）
     void SetCloseCallback(void (*cb)(sock_fd));
 

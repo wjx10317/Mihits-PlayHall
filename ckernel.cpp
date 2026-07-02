@@ -11,6 +11,8 @@ qRegisterMetaType<classname>("classname");
 #include<QSettings>
 #include<QCoreApplication>
 #include<QFileInfo>
+#include<QApplication>
+#include<QKeyEvent>
 void CKernel::ConfigSet()
 {
     //获取配置文件的信息以及设置
@@ -46,15 +48,15 @@ void CKernel::ConfigSet()
     }
 }
 
-static std::string getmd5(QString str)
+/*static std::string getmd5(QString str)
 {
     MD5 md(str.toStdString());
     return md.toString();
-}
+}*/
 CKernel::CKernel(QObject *parent):
     QObject(parent),m_dialog(new Dialog),m_logindialog(new LoginDialog),
     m_roomdialog(new roomDialog),m_fiveinlinezone(new fiveinlinezone),m_client(new TcpClientMediator),
-    m_id(0),m_roomid(0),m_zoneid(0)
+    m_id(0),m_roomid(0),m_zoneid(0),m_reconnecting(false),m_reconnectInGame(false)
 
 {
     m_logindialog->show();
@@ -97,8 +99,26 @@ CKernel::CKernel(QObject *parent):
     // Phase1: 心跳 + 断线检测
     connect(&m_heartbeatTimer, SIGNAL(timeout()), this, SLOT(slot_sendHeartbeat()));
     connect(m_client, SIGNAL(SIG_disConnect()), this, SLOT(slot_disConnect()));
+    qApp->installEventFilter(this);
     setnetpackmap();
 
+}
+bool CKernel::eventFilter(QObject *obj, QEvent *event)
+{
+    if (event->type() == QEvent::KeyPress && m_id != 0)
+    {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+        if (keyEvent->key() == Qt::Key_F12 && keyEvent->modifiers() == Qt::NoModifier)
+        {
+            qDebug() << "[DEV] F12 simulate disconnect";
+            m_client->blockSignals(true);
+            m_client->CloseNet();
+            m_client->blockSignals(false);
+            QMetaObject::invokeMethod(this, "slot_disConnect", Qt::QueuedConnection);
+            return true;
+        }
+    }
+    return QObject::eventFilter(obj, event);
 }
 void CKernel::Des_Instance()
 {
@@ -125,6 +145,7 @@ void CKernel::setnetpackmap()
     m_NetPackMap[ DEF_FIL_PIECEDOWN   -_DEF_PACK_BASE]=&CKernel::slot_dealpiecedown;
     m_NetPackMap[DEF_FIL_ALLRECORD_RS - _DEF_PACK_BASE] = &CKernel::slot_deal_allrecordrs;
     m_NetPackMap[DEF_FIL_SINGLERECORD_RS - _DEF_PACK_BASE] = &CKernel::slot_deal_singlerecordrs;
+    m_NetPackMap[DEF_FIL_RECONNECT_RS - _DEF_PACK_BASE] = &CKernel::slot_reconnectRs;
 
 }
 void CKernel::sendData(char* buf , int nlen )
@@ -154,23 +175,23 @@ void CKernel::slot_deal_readydata(unsigned int lSendIP , char* buf , int nlen)
 void CKernel::slot_registerRq(QString tel,QString password,QString nick)
 {
     STRU_REGISTER_RQ rq;
-    strcpy(rq.tel,tel.toStdString().c_str());
-     strcpy(rq.password,getmd5(password).c_str());
+    strcpy_s(rq.tel,tel.toStdString().c_str());
+     strcpy_s(rq.password,password.toStdString().c_str());
     //兼容中文
     std::string strname = nick.toStdString();
-    strcpy(rq.name,strname.c_str());
+    strcpy_s(rq.name,strname.c_str());
     qDebug()<<"send register request";
     sendData((char*)&rq,sizeof(rq));
 }
 void CKernel::slot_loginRq(QString tel,QString password)
 {
     STRU_LOGIN_RQ rq;
-    strcpy(rq.tel,tel.toStdString().c_str());
-    strcpy(rq.password,getmd5(password).c_str());
+    strcpy_s(rq.tel,tel.toStdString().c_str());
+    strcpy_s(rq.password,password.toStdString().c_str());
      sendData((char*)&rq,sizeof(rq));
 
 }
-void CKernel::slot_registerRs(unsigned int lSendIP , char* buf , int nlen)
+void CKernel::slot_registerRs(unsigned int , char* buf , int )
 {
     STRU_REGISTER_RS rs = *(STRU_REGISTER_RS*)buf;
     switch(rs.result)
@@ -191,7 +212,7 @@ void CKernel::slot_registerRs(unsigned int lSendIP , char* buf , int nlen)
 
 
 }
-void CKernel::slot_loginRs(unsigned int lSendIP , char* buf , int nlen)
+void CKernel::slot_loginRs(unsigned int , char* buf , int)
 {
     STRU_LOGIN_RS rs = *(STRU_LOGIN_RS*)buf;
     switch(rs.result)
@@ -207,9 +228,9 @@ void CKernel::slot_loginRs(unsigned int lSendIP , char* buf , int nlen)
         m_dialog->show();
         m_id = rs.userid;
         m_username = QString::fromStdString(rs.name);
-        strcpy(m_reconnectToken, rs.token);
+        strcpy_s(m_reconnectToken, rs.token);
         // 启动心跳（每 5 秒发一次）
-        m_heartbeatTimer.start(5000);
+        m_heartbeatTimer.start(_DEF_HEARTBEAT_INTERVAL_MS);
         break;
         default:
         QMessageBox::about(this->m_logindialog,"提示","登录异常");
@@ -266,7 +287,7 @@ void CKernel::slot_leavezone()
     //ui跳转
     m_dialog->show();
 }
-void CKernel::slot_joinroomrs( unsigned int lSendIP , char* buf , int nlen)
+void CKernel::slot_joinroomrs( unsigned int , char* buf , int )
 {
     STRU_JOIN_ROOM_RS* rs = (STRU_JOIN_ROOM_RS*)buf;
     if(rs->result==0)
@@ -288,9 +309,19 @@ void CKernel::slot_joinroomrs( unsigned int lSendIP , char* buf , int nlen)
 
 
 }
-void CKernel::slot_roommemberrq( unsigned int lSendIP , char* buf , int nlen)
+void CKernel::slot_roommemberrq( unsigned int  , char* buf , int )
 {
     STRU_ROOM_MENBER* rq = (STRU_ROOM_MENBER*)buf;
+    if (rq->userid == -1)
+    {
+        m_reconnecting = false;
+        if (m_reconnectInGame)
+        {
+            m_roomdialog->setGameStart();
+            m_reconnectInGame = false;
+        }
+        return;
+    }
     if(rq->status==_host)
     {
         m_roomdialog->setHostInfo(rq->userid,QString::fromStdString(rq->name));
@@ -309,6 +340,7 @@ void CKernel::slot_roommemberrq( unsigned int lSendIP , char* buf , int nlen)
     if(rq->userid==m_id)
     {
         m_roomdialog->setUserStatus(rq->status);
+        m_ishost = (rq->status == _host);
     }
 }
 void CKernel::slot_leaveroom()
@@ -329,7 +361,7 @@ void CKernel::slot_leaveroom()
     m_roomid = 0;
     m_ishost = false;
 }
-void CKernel::slot_leaveroomrq(unsigned int lSendIP , char* buf , int nlen)
+void CKernel::slot_leaveroomrq(unsigned int, char* buf , int)
 {//补加判断游戏是否开始，否则直接判负结束游戏，不保存
 
     STRU_LEAVE_ROOM_RQ* rq =(STRU_LEAVE_ROOM_RQ*)buf;
@@ -411,7 +443,7 @@ void CKernel::slot_sendgamenotready(int zoneid,int roomid,int userid)
     rq.userid =userid;
     sendData((char*)&rq,sizeof(rq));
 }
-void CKernel::slot_dealroomready(unsigned int lSendIP , char* buf , int nlen)
+void CKernel::slot_dealroomready(unsigned int , char* buf , int )
 {
     // 拆包
     qDebug()<<__func__;
@@ -421,7 +453,7 @@ void CKernel::slot_dealroomready(unsigned int lSendIP , char* buf , int nlen)
         m_roomdialog->setPlayerReady( rq->userid );
     }
 }
-void CKernel::slot_dealroomnotready(unsigned int lSendIP , char* buf , int nlen)
+void CKernel::slot_dealroomnotready(unsigned int, char* buf , int)
 {
     // 拆包
     STRU_FIL_RQ* rq = (STRU_FIL_RQ*)buf;
@@ -430,7 +462,7 @@ void CKernel::slot_dealroomnotready(unsigned int lSendIP , char* buf , int nlen)
         m_roomdialog->delPlayerReady( rq->userid );
     }
 }
-void CKernel::slot_dealroomstart(unsigned int lSendIP , char* buf , int nlen)
+void CKernel::slot_dealroomstart(unsigned int, char* buf , int)
 {
     STRU_FIL_RQ* rq = (STRU_FIL_RQ*)buf;
     // 什么专区 什么房间 谁 做了什么事
@@ -438,7 +470,7 @@ void CKernel::slot_dealroomstart(unsigned int lSendIP , char* buf , int nlen)
         m_roomdialog->setGameStart();
     }
 }
-void CKernel::slot_dealpiecedown(unsigned int lSendIP , char* buf , int nlen)
+void CKernel::slot_dealpiecedown(unsigned int, char* buf , int)
 {
     STRU_FIL_PIECEDOWN* rq = (STRU_FIL_PIECEDOWN*)buf;
     m_roomdialog->slot_piecedown(rq->color,rq->x,rq->y);
@@ -487,7 +519,7 @@ void CKernel::slot_PlayByCpuEnd(int zoneid, int roomid, int userid)
     sendData( (char*)&rq , sizeof(rq) );
 }
 
-void CKernel::slot_dealaibegin(unsigned int lSendIP, char *buf, int nlen)
+void CKernel::slot_dealaibegin(unsigned int, char *buf, int)
 {
     //拆包
     qDebug()<<__func__;
@@ -510,7 +542,7 @@ void CKernel::slot_dealaibegin(unsigned int lSendIP, char *buf, int nlen)
     }
 }
 
-void CKernel::slot_dealaiend(unsigned int lSendIP, char *buf, int nlen)
+void CKernel::slot_dealaiend(unsigned int, char *buf, int)
 {
     //拆包
     STRU_FIL_RQ * rq = (STRU_FIL_RQ *)buf;
@@ -554,14 +586,14 @@ void CKernel::slot_sendsinglerecordrq(QString time)
     sendData((char*)&rq,sizeof(rq));
 }
 
-void CKernel::slot_deal_allrecordrs(unsigned int lSendIP, char *buf, int nlen)
+void CKernel::slot_deal_allrecordrs(unsigned int, char *buf, int)
 {
     STRU_FIL_ALLRECORD_RS* rs = (STRU_FIL_ALLRECORD_RS*)buf;
 
     m_fiveinlinezone->addrecord(QString(rs->c_time),QString(rs->hostid),QString(rs->playerid));
 }
 
-void CKernel::slot_deal_singlerecordrs(unsigned int lSendIP, char *buf, int nlen)
+void CKernel::slot_deal_singlerecordrs(unsigned int, char *buf, int)
 {
     STRU_FIL_SINGLERECORD_RS* rs = (STRU_FIL_SINGLERECORD_RS*)buf;
     if(rs->result)
@@ -584,7 +616,7 @@ void CKernel::slot_reshowwindow()
     m_fiveinlinezone->show();
 }
 
-void CKernel::slot_dealzoneroominfo(unsigned int lSendIP, char *buf, int nlen)
+void CKernel::slot_dealzoneroominfo(unsigned int, char *buf, int)
 {
     STRU_ZONE_ROOM_INFO * rq = (STRU_ZONE_ROOM_INFO*)buf;
     std::vector<roomitem*>&vec = m_fiveinlinezone->getvecroomitem();
@@ -604,7 +636,56 @@ void CKernel::slot_sendHeartbeat()
     hb.userid = m_id;
     hb.zoneid = m_zoneid;
     hb.roomid = m_roomid;
-    //sendData((char*)&hb, sizeof(hb));
+    sendData((char*)&hb, sizeof(hb));
+}
+
+void CKernel::slot_reconnectRs(unsigned int, char *buf, int)
+{
+    STRU_FIL_RECONNECT_RS* rs = (STRU_FIL_RECONNECT_RS*)buf;
+
+    if (rs->result == 0)
+    {
+        QMessageBox::warning(m_logindialog, "提示", "重连失败，请重新登录");
+        m_heartbeatTimer.stop();
+        m_roomdialog->hide();
+        m_fiveinlinezone->hide();
+        m_dialog->hide();
+        m_logindialog->show();
+        m_id = 0;
+        m_roomid = 0;
+        m_zoneid = 0;
+        return;
+    }
+
+    m_zoneid = rs->zoneid;
+    m_roomid = rs->roomid;
+
+    if (rs->zoneid == 0)
+    {
+        m_roomdialog->hide();
+        m_fiveinlinezone->hide();
+        m_dialog->show();
+        m_rqtimer.stop();
+        return;
+    }
+
+    if (rs->roomid == 0)
+    {
+        m_dialog->hide();
+        m_roomdialog->hide();
+        m_fiveinlinezone->show();
+        m_rqtimer.start(1000);
+        slot_roominfozone();
+        return;
+    }
+
+    m_dialog->hide();
+    m_fiveinlinezone->hide();
+    m_reconnectInGame = (rs->inGame == 1);
+    m_roomdialog->clearroom();
+    m_roomdialog->setinfo(rs->roomid);
+    m_roomdialog->show();
+    m_reconnecting = true;
 }
 
 void CKernel::slot_disConnect()
@@ -632,7 +713,7 @@ void CKernel::slot_disConnect()
             strcpy(rq.token, m_reconnectToken);
             sendData((char*)&rq, sizeof(rq));
             // 重新启动心跳
-            m_heartbeatTimer.start(5000);
+            m_heartbeatTimer.start(_DEF_HEARTBEAT_INTERVAL_MS);
         }
         else
         {

@@ -51,11 +51,14 @@ public:
     void FIL_AllRecordRq(sock_fd clientfd, char *szbuf, int nlen);
     void FIL_SingleRecordRq(sock_fd clientfd, char *szbuf, int nlen);
     void HeartBeatRq(sock_fd clientfd, char *szbuf, int nlen);
+    void ReconnectRq(sock_fd clientfd, char *szbuf, int nlen);
     // Phase1: 定时扫描心跳，清理超时用户
     void CheckHeartBeat();
     void HandleDisconnect(int userid);
     // 静态回调：recv_task 检测到 fd 断开时清理业务数据
     static void OnFdClosed(sock_fd fd);
+    string getbcrypt(char* password, int cost);
+    bool comparebcrypt(const char* src, const char* dst);
     private:
     TcpKernel* m_pKernel;
     CMysql * m_sql;

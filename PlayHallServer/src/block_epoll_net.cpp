@@ -190,16 +190,7 @@ void* Block_Epoll_Net::recv_task(void* arg)
 
     }while(0);
 
-// 借助 do..while 在最后统一处理错误  避免使用goto语句
-    // 通知业务层：fd 即将关闭
-    if (pthis->m_closeCb)
-        pthis->m_closeCb(ev->fd);
-    ev->eventdel();
-    close(ev->fd);
-    //回收event结构
-    //pthis->m_mapSockfdToEvent.erase( ev->fd );
-    pthis->m_mapSockfdToEvent.erase( ev->fd );
-    delete ev;
+    pthis->CloseFd(ev->fd, true);
     return NULL;
 
 }
@@ -226,12 +217,19 @@ void Block_Epoll_Net::SetCloseCallback(void (*cb)(sock_fd))
     m_closeCb = cb;
 }
 
-void Block_Epoll_Net::CloseFd(sock_fd fd)
+void Block_Epoll_Net::CloseFd(sock_fd fd, bool notify)
 {
     myevent_s* ev = nullptr;
-    if (m_mapSockfdToEvent.find(fd, ev))
-        ev->eventdel();
+    if (!m_mapSockfdToEvent.find(fd, ev))
+        return;
+
+    if (notify && m_closeCb)
+        m_closeCb(fd);
+
+    ev->eventdel();
     close(fd);
+    m_mapSockfdToEvent.erase(fd);
+    delete ev;
 }
 
 void Block_Epoll_Net::epollout_event( myevent_s *ev )
