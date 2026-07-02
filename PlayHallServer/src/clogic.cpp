@@ -33,7 +33,7 @@ void CLogic::setNetPackMap()
 #define _DEF_COUT_FUNC_    cout << "clientfd:"<< clientfd << __func__ << endl;
 
 //注册
-void CLogic::RegisterRq(sock_fd clientfd,char* szbuf,int nlen)
+void CLogic::RegisterRq(sock_fd clientfd,char* szbuf,int )
 {
     //cout << "clientfd:"<< clientfd << __func__ << endl;
     _DEF_COUT_FUNC_
@@ -70,10 +70,10 @@ void CLogic::RegisterRq(sock_fd clientfd,char* szbuf,int nlen)
             rs.result = register_success;
             string bcstr = getbcrypt(rq->password, 10);
             sprintf(szsql,"insert into t_user(tel,password,name)values('%s','%s','%s')"
-                    ,rq->tel,bcstr,rq->name);
+                    ,rq->tel,bcstr.c_str(),rq->name);
             if(!m_sql->UpdataMysql(szsql))
             {
-                printf("update fail:%s,%s\n",szsql);           
+                printf("update fail:%s\n",szsql);
                 rs.result = 210317;
             }
 
@@ -90,7 +90,7 @@ void CLogic::RegisterRq(sock_fd clientfd,char* szbuf,int nlen)
 }
 
 //登录
-void CLogic::LoginRq(sock_fd clientfd ,char* szbuf,int nlen)
+void CLogic::LoginRq(sock_fd clientfd ,char* szbuf,int)
 {
 //    cout << "clientfd:"<< clientfd << __func__ << endl;
     _DEF_COUT_FUNC_
@@ -112,7 +112,7 @@ void CLogic::LoginRq(sock_fd clientfd ,char* szbuf,int nlen)
         result.pop_front();
         string name = result.front();
         result.pop_front();
-        if(!comparebcrypt(rq->password,password))
+        if(!comparebcrypt(rq->password,password.c_str()))
         {
             rs.result = password_error;
         }
@@ -179,7 +179,7 @@ void CLogic::LoginRq(sock_fd clientfd ,char* szbuf,int nlen)
 
 }
 
-void CLogic::JoinZoneRq(sock_fd clientfd, char *szbuf, int nlen)
+void CLogic::JoinZoneRq(sock_fd clientfd, char *szbuf, int)
 {
     _DEF_COUT_FUNC_
      STRU_JOIN_ZONE * rq = (STRU_JOIN_ZONE*)szbuf;
@@ -190,7 +190,7 @@ void CLogic::JoinZoneRq(sock_fd clientfd, char *szbuf, int nlen)
    }
    info->m_zoneid = rq->zoneid;
 }
-void CLogic::LeaveZoneRq(sock_fd clientfd, char *szbuf, int nlen)
+void CLogic::LeaveZoneRq(sock_fd clientfd, char *szbuf, int)
 {
     _DEF_COUT_FUNC_
      STRU_LEAVE_ZONE * rq = (STRU_LEAVE_ZONE*)szbuf;
@@ -202,7 +202,7 @@ void CLogic::LeaveZoneRq(sock_fd clientfd, char *szbuf, int nlen)
     info->m_zoneid = 0;
 }
 
-void CLogic::JoinRoomRq(sock_fd clientfd, char *szbuf, int nlen)
+void CLogic::JoinRoomRq(sock_fd clientfd, char *szbuf, int)
 {
     _DEF_COUT_FUNC_
      STRU_JOIN_ROOM_RQ * rq = (STRU_JOIN_ROOM_RQ*)szbuf;
@@ -238,7 +238,6 @@ void CLogic::JoinRoomRq(sock_fd clientfd, char *szbuf, int nlen)
             break;
     }
     list<int> tmplist =usrlst;
-    printf("%d\n",tmplist.size());
     pthread_mutex_unlock(&m_roomListlock);
     SendData(clientfd,(char*)&rs,sizeof(rs));
 
@@ -289,12 +288,12 @@ void CLogic::JoinRoomRq(sock_fd clientfd, char *szbuf, int nlen)
     // 2 join fail
 }
 
-void CLogic::zoneinfoRq(sock_fd clientfd, char *szbuf, int nlen)
+void CLogic::zoneinfoRq(sock_fd clientfd, char *szbuf, int)
 {
     _DEF_COUT_FUNC_
     STRU_ZONE_INFO_RQ *rq = (STRU_ZONE_INFO_RQ*)szbuf;
     STRU_ZONE_ROOM_INFO rs;
-    for(int i=1;i<m_roomList.size();i++)
+    for(int i=1;i<static_cast<int>(m_roomList.size());i++)
     {
         list<int>&lst = m_roomList[i];
         rs.roomInfo[i] =lst.size();
@@ -379,15 +378,15 @@ _DEF_COUT_FUNC_
     pthread_mutex_unlock(&m_roomcachelock);
 }
 
-void CLogic::FIL_Gameover(sock_fd clientfd, char *szbuf, int nlen)
+void CLogic::FIL_Gameover(sock_fd clientfd, char *szbuf, int)
 {
     _DEF_COUT_FUNC_
     STRU_FIL_RQ* rq = (STRU_FIL_RQ*)szbuf;
     //depend on zoneid to find which room is over
-    //int zoneid = rq->zoneid;
+    int zoneid = rq->zoneid;
     int roomid = rq->roomid;
     pthread_mutex_lock(&m_roomcachelock);
-    auto it = room_cache.find(rq->roomid);
+    auto it = room_cache.find(roomid);
     if(it==room_cache.end())
     {
         pthread_mutex_unlock(&m_roomcachelock);
@@ -408,14 +407,14 @@ void CLogic::FIL_Gameover(sock_fd clientfd, char *szbuf, int nlen)
     char szsql[4096]="";
     int count =0;
     int id[2];
-    for(auto ite = m_roomList[rq->roomid].begin()
-        ;count<2&&ite!=m_roomList[rq->roomid].end();ite++,count++)
+    for(auto ite = m_roomList[roomid].begin()
+        ;count<2&&ite!=m_roomList[roomid].end();ite++,count++)
     {
         id[count] = (*ite);
     }
 
     sprintf(szsql,"insert into t_records(idA,idB,zoneid,roomid,data) values(%d,%d,%d,%d,'%s')"
-              ,id[0],id[1],rq->zoneid,rq->roomid,doc.toJson(QJsonDocument::Compact).constData());
+              ,id[0],id[1],zoneid,roomid,doc.toJson(QJsonDocument::Compact).constData());
     if(!m_sql->UpdataMysql(szsql))
     {
         printf("data json insert error\n");
@@ -433,7 +432,7 @@ void CLogic::FIL_GameStart(sock_fd clientfd, char *szbuf, int nlen)
     FIL_MsgSendRq(clientfd,szbuf,nlen);
 }
 
-void CLogic::FIL_AllRecordRq(sock_fd clientfd, char *szbuf, int nlen)
+void CLogic::FIL_AllRecordRq(sock_fd clientfd, char *szbuf, int)
 {
     _DEF_COUT_FUNC_
     STRU_FIL_ALLRECORD_RQ* rq = (STRU_FIL_ALLRECORD_RQ*)szbuf;
@@ -492,7 +491,7 @@ void CLogic::FIL_AllRecordRq(sock_fd clientfd, char *szbuf, int nlen)
     }
 }
 
-void CLogic::FIL_SingleRecordRq(sock_fd clientfd, char *szbuf, int nlen)
+void CLogic::FIL_SingleRecordRq(sock_fd clientfd, char *szbuf, int)
 {
     STRU_FIL_SINGLERECORD_RQ* rq = (STRU_FIL_SINGLERECORD_RQ*)szbuf;
     STRU_FIL_SINGLERECORD_RS rs;
@@ -579,7 +578,7 @@ void CLogic::FIL_SingleRecordRq(sock_fd clientfd, char *szbuf, int nlen)
 // ============================================================
 // 断线重连
 // ============================================================
-void CLogic::ReconnectRq(sock_fd clientfd, char *szbuf, int nlen)
+void CLogic::ReconnectRq(sock_fd clientfd, char *szbuf, int)
 {
     STRU_FIL_RECONNECT_RQ* rq = (STRU_FIL_RECONNECT_RQ*)szbuf;
     STRU_FIL_RECONNECT_RS rs;
@@ -725,7 +724,7 @@ void CLogic::ReconnectRq(sock_fd clientfd, char *szbuf, int nlen)
 // ============================================================
 // Phase1: 心跳 + 掉线处理
 // ============================================================
-void CLogic::HeartBeatRq(sock_fd clientfd, char *szbuf, int nlen)
+void CLogic::HeartBeatRq(sock_fd clientfd, char *szbuf, int)
 {
     STRU_FIL_HEARTBEAT* rq = (STRU_FIL_HEARTBEAT*)szbuf;
     pthread_mutex_lock(&m_heartbeatLock);
