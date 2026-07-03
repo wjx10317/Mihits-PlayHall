@@ -6,6 +6,7 @@
 #include<map>
 #include<vector>
 #include<QPair>
+
 class CLogic
 {
 public:
@@ -57,9 +58,17 @@ public:
     void HandleDisconnect(int userid);
     // 静态回调：recv_task 检测到 fd 断开时清理业务数据
     static void OnFdClosed(sock_fd fd);
-    string getbcrypt(char* password, int cost);
-    bool comparebcrypt(const char* src, const char* dst);
-    private:
+    string getbcrypt(char* password , int cost);
+    bool comparebcrypt(const char* src,const char* dst);
+
+private:
+    int  GetRoomMemberStatus(int roomid, int userid);
+    void SendToRoomOnline(int roomid, int excludeUserid, char* buf, int nlen);
+    void RemoveUserFromRoomList(int roomid, int userid);
+    void ClearRoomGameCache(int roomid);
+    void NotifyRoomSoftDisconnect(int userid, USER_INFO* info);
+    void NotifyRoomHardDisconnect(int userid, USER_INFO* info);
+
     TcpKernel* m_pKernel;
     CMysql * m_sql;
     Block_Epoll_Net * m_tcp;

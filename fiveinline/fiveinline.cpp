@@ -128,6 +128,8 @@ void FiveInLine::mousePressEvent(QMouseEvent *event)
 {
     if(isOver)
         goto quit;
+    if(m_isSpectating)
+        goto quit;
     if(m_status!=m_turns%2)
         goto quit;
     m_isMove_fl = true;
@@ -139,6 +141,8 @@ quit:
 void FiveInLine::mouseMoveEvent(QMouseEvent *event)
 {
     if(isOver)
+        goto quit;
+    if(m_isSpectating)
         goto quit;
     if(m_status!=m_turns%2)
         goto quit;
@@ -158,6 +162,8 @@ void FiveInLine::mouseReleaseEvent(QMouseEvent *event)
     float col = (float)event->pos().x();
     float row = (float)event->pos().y();
     if(isOver)
+        goto quit;
+    if(m_isSpectating)
         goto quit;
     if(m_status!=m_turns%2)
         goto quit;

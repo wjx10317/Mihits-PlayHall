@@ -207,8 +207,42 @@ void CLogic::JoinRoomRq(sock_fd clientfd, char *szbuf, int)
     _DEF_COUT_FUNC_
      STRU_JOIN_ROOM_RQ * rq = (STRU_JOIN_ROOM_RQ*)szbuf;
     STRU_JOIN_ROOM_RS rs;
+    rs.userid = rq->userid;
+    rs.roomid = rq->roomid;
+
+    USER_INFO* info = nullptr;
+    if (!m_mapfdtouserinfo.find(rq->userid, info))
+        return;
+
+    if (info->m_roomid != 0 && info->m_roomid != (int)rq->roomid)
+    {
+        rs.result = 0;
+        rs.status = _spec;
+        SendData(clientfd, (char*)&rs, sizeof(rs));
+        return;
+    }
+
     pthread_mutex_lock(&m_roomListlock);
     list<int>& usrlst = m_roomList[rq->roomid];
+
+    int pos = 0;
+    for (auto ite = usrlst.begin(); ite != usrlst.end(); ++ite, ++pos)
+    {
+        if (*ite != rq->userid)
+            continue;
+        rs.result = 1;
+        if (pos == 0)
+            rs.status = _host;
+        else if (pos == 1)
+            rs.status = _player;
+        else
+            rs.status = _spec;
+        pthread_mutex_unlock(&m_roomListlock);
+        SendData(clientfd, (char*)&rs, sizeof(rs));
+        info->m_roomid = rq->roomid;
+        return;
+    }
+
     switch(usrlst.size())
     {
         case 0:
@@ -306,27 +340,28 @@ void CLogic::LeaveRoomRq(sock_fd clientfd, char *szbuf, int nlen)
     _DEF_COUT_FUNC_
     STRU_LEAVE_ROOM_RQ* rq = (STRU_LEAVE_ROOM_RQ*) szbuf;
     int id = rq->userid;
-    list<int>::iterator it;
-    list<int>& usrlst = m_roomList[rq->roomid];
-    for(auto ite = usrlst.begin();ite!=usrlst.end();ite++)
-    {
-        if(*ite!=id)
-        {
-            USER_INFO* info =nullptr;
-            if(!m_mapfdtouserinfo.find(*ite,info))
-                continue;
-            if (!IS_ONLINE_SOCKFD(info->m_sockfd))
-                continue;
-            SendData(info->m_sockfd,szbuf,nlen);
-        }
-        else
-        {
-            it =ite;
-        }
-    }
+
     pthread_mutex_lock(&m_roomListlock);
-    usrlst.erase(it);
+    list<int>& usrlst = m_roomList[rq->roomid];
+    bool found = false;
+    for (auto ite = usrlst.begin(); ite != usrlst.end(); ++ite)
+    {
+        if (*ite == id)
+        {
+            found = true;
+            continue;
+        }
+        USER_INFO* peer = nullptr;
+        if (!m_mapfdtouserinfo.find(*ite, peer))
+            continue;
+        if (!IS_ONLINE_SOCKFD(peer->m_sockfd))
+            continue;
+        SendData(peer->m_sockfd, szbuf, nlen);
+    }
+    if (found)
+        usrlst.remove(id);
     pthread_mutex_unlock(&m_roomListlock);
+
     USER_INFO* info = nullptr;
     if (m_mapfdtouserinfo.find(id, info))
         info->m_roomid = 0;
@@ -696,6 +731,16 @@ void CLogic::ReconnectRq(sock_fd clientfd, char *szbuf, int)
         }
     }
 
+    if (reconnectStatus <= _player)
+    {
+        STRU_FIL_OPPONENT_DISCONNECT online;
+        online.userid = rq->userid;
+        online.roomid = roomid;
+        online.status = reconnectStatus;
+        online.kind = DEF_DISCONNECT_REONLINE;
+        SendToRoomOnline(roomid, rq->userid, (char*)&online, sizeof(online));
+    }
+
     if (inGame == 1)
     {
         pthread_mutex_lock(&m_roomcachelock);
@@ -719,6 +764,112 @@ void CLogic::ReconnectRq(sock_fd clientfd, char *szbuf, int)
             step++;
         }
     }
+}
+
+// ============================================================
+// 房间内断线通知
+// ============================================================
+int CLogic::GetRoomMemberStatus(int roomid, int userid)
+{
+    pthread_mutex_lock(&m_roomListlock);
+    list<int>& lst = m_roomList[roomid];
+    int status = -1;
+    for (auto ite = lst.begin(); ite != lst.end(); ++ite)
+    {
+        if (status < 2)
+            status++;
+        if (*ite == userid)
+        {
+            pthread_mutex_unlock(&m_roomListlock);
+            return status;
+        }
+    }
+    pthread_mutex_unlock(&m_roomListlock);
+    return _spec;
+}
+
+void CLogic::SendToRoomOnline(int roomid, int excludeUserid, char* buf, int nlen)
+{
+    pthread_mutex_lock(&m_roomListlock);
+    list<int> copy = m_roomList[roomid];
+    pthread_mutex_unlock(&m_roomListlock);
+
+    for (int uid : copy)
+    {
+        if (uid == excludeUserid)
+            continue;
+        USER_INFO* mem = nullptr;
+        if (!m_mapfdtouserinfo.find(uid, mem))
+            continue;
+        if (!IS_ONLINE_SOCKFD(mem->m_sockfd))
+            continue;
+        SendData(mem->m_sockfd, buf, nlen);
+    }
+}
+
+void CLogic::RemoveUserFromRoomList(int roomid, int userid)
+{
+    pthread_mutex_lock(&m_roomListlock);
+    list<int>& lst = m_roomList[roomid];
+    for (auto ite = lst.begin(); ite != lst.end(); ++ite)
+    {
+        if (*ite == userid)
+        {
+            lst.erase(ite);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&m_roomListlock);
+}
+
+void CLogic::ClearRoomGameCache(int roomid)
+{
+    pthread_mutex_lock(&m_roomcachelock);
+    room_cache.erase(roomid);
+    pthread_mutex_unlock(&m_roomcachelock);
+}
+
+void CLogic::NotifyRoomSoftDisconnect(int userid, USER_INFO* info)
+{
+    int roomid = info->m_roomid;
+    if (roomid <= 0)
+        return;
+
+    int status = GetRoomMemberStatus(roomid, userid);
+    if (status > _player)
+        return;
+
+    STRU_FIL_OPPONENT_DISCONNECT pkt;
+    pkt.userid = userid;
+    pkt.roomid = roomid;
+    pkt.status = status;
+    pkt.kind = DEF_DISCONNECT_SOFT;
+    SendToRoomOnline(roomid, userid, (char*)&pkt, sizeof(pkt));
+}
+
+void CLogic::NotifyRoomHardDisconnect(int userid, USER_INFO* info)
+{
+    int roomid = info->m_roomid;
+    if (roomid <= 0)
+        return;
+
+    int status = GetRoomMemberStatus(roomid, userid);
+    if (status > _player)
+    {
+        RemoveUserFromRoomList(roomid, userid);
+        return;
+    }
+
+    STRU_FIL_OPPONENT_DISCONNECT pkt;
+    pkt.userid = userid;
+    pkt.roomid = roomid;
+    pkt.status = status;
+    pkt.kind = DEF_DISCONNECT_HARD;
+    SendToRoomOnline(roomid, userid, (char*)&pkt, sizeof(pkt));
+
+    ClearRoomGameCache(roomid);
+    RemoveUserFromRoomList(roomid, userid);
+    info->m_roomid = 0;
 }
 
 // ============================================================
@@ -761,6 +912,8 @@ void CLogic::HandleDisconnect(int userid)
     if (!m_mapfdtouserinfo.find(userid, info))
         return;
 
+    NotifyRoomHardDisconnect(userid, info);
+
     sock_fd old_fd = info->m_sockfd;
 
     // 清理业务数据
@@ -795,7 +948,10 @@ void CLogic::OnFdClosed(sock_fd fd)
 
     USER_INFO* info = nullptr;
     if (logic->m_mapfdtouserinfo.find(userid, info))
+    {
         info->m_sockfd = _DEF_OFFLINE_SOCKFD;
+        logic->NotifyRoomSoftDisconnect(userid, info);
+    }
 }
 string CLogic::getbcrypt(char* password, int cost)
 {

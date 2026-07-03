@@ -146,6 +146,7 @@ void CKernel::setnetpackmap()
     m_NetPackMap[DEF_FIL_ALLRECORD_RS - _DEF_PACK_BASE] = &CKernel::slot_deal_allrecordrs;
     m_NetPackMap[DEF_FIL_SINGLERECORD_RS - _DEF_PACK_BASE] = &CKernel::slot_deal_singlerecordrs;
     m_NetPackMap[DEF_FIL_RECONNECT_RS - _DEF_PACK_BASE] = &CKernel::slot_reconnectRs;
+    m_NetPackMap[DEF_FIL_OPPONENT_DISCONNECT - _DEF_PACK_BASE] = &CKernel::slot_opponentDisconnect;
 
 }
 void CKernel::sendData(char* buf , int nlen )
@@ -267,6 +268,7 @@ void CKernel::slot_joinroom(int roomid)
     if(m_roomid!=0)
     {
         QMessageBox::about(nullptr,"提示","已经在房间，无法重复加入");
+        return;
     }
 
     STRU_JOIN_ROOM_RQ rq;
@@ -365,6 +367,8 @@ void CKernel::slot_leaveroomrq(unsigned int, char* buf , int)
 {//补加判断游戏是否开始，否则直接判负结束游戏，不保存
 
     STRU_LEAVE_ROOM_RQ* rq =(STRU_LEAVE_ROOM_RQ*)buf;
+    if (rq->status <= _player)
+        m_roomdialog->clear_pushbutton(true);
     if(rq->status==_host)
     {
         if(m_roomdialog->getStatus()==_player)
@@ -637,6 +641,36 @@ void CKernel::slot_sendHeartbeat()
     hb.zoneid = m_zoneid;
     hb.roomid = m_roomid;
     sendData((char*)&hb, sizeof(hb));
+}
+
+void CKernel::slot_opponentDisconnect(unsigned int, char *buf, int)
+{
+    STRU_FIL_OPPONENT_DISCONNECT* rq = (STRU_FIL_OPPONENT_DISCONNECT*)buf;
+    if (rq->roomid != m_roomid)
+        return;
+
+    if (rq->kind == DEF_DISCONNECT_SOFT)
+    {
+        if (rq->status <= _player)
+            m_roomdialog->setMemberOffline(rq->userid);
+        return;
+    }
+
+    if (rq->kind == DEF_DISCONNECT_REONLINE)
+    {
+        if (rq->status <= _player)
+            m_roomdialog->setMemberOnline(rq->userid);
+        return;
+    }
+
+    if (rq->kind == DEF_DISCONNECT_HARD && rq->status <= _player)
+    {
+        STRU_LEAVE_ROOM_RQ leave;
+        leave.userid = rq->userid;
+        leave.status = rq->status;
+        leave.roomid = rq->roomid;
+        slot_leaveroomrq(0, (char*)&leave, sizeof(leave));
+    }
 }
 
 void CKernel::slot_reconnectRs(unsigned int, char *buf, int)

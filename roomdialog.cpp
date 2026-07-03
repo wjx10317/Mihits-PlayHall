@@ -3,6 +3,7 @@
 #include"packdef.h"
 #include<QMessageBox>
 #include<QDebug>
+#include<QImage>
 roomDialog::roomDialog(QWidget *parent) :
     QDialog(parent),
     ui(new Ui::roomDialog),m_roomid(0)
@@ -88,19 +89,7 @@ void roomDialog::clearroom()
     ui->lb_player1_icon->setPixmap(QPixmap(":/icon/slotwait.png"));
     ui->lb_player2_icon->setPixmap(QPixmap(":/icon/slotwait.png"));
 
-    //游戏界面清空
-    ui->pb_begin->setEnabled( false );
-    ui->pb_player1_ready->setEnabled(true);
-    ui->pb_player1_ready->setChecked( false );
-    ui->pb_player2_ready->setEnabled(true);
-    ui->pb_player2_ready->setChecked( false );
-    ui->pb_player1_ready->setText("待准备");
-    ui->pb_player2_ready->setText("待准备");
-    ui->pb_player1_cpu->setChecked(false);
-    ui->pb_player2_cpu->setChecked(false);
-
-    ui->pb_player1_cpu->setText("待托管");
-    ui->pb_player2_cpu->setText("待托管");
+    clear_pushbutton();
     ui->widget->clear();
     // 重置时隐藏AI推荐
     ui->lb_ai_best1->setVisible(false);
@@ -179,7 +168,7 @@ void roomDialog::setGameStart()
      ui->widget->slot_startgame();
 }
 
-void roomDialog::clear_pushbutton()
+void roomDialog::clear_pushbutton(bool clearBoard)
 {
     ui->pb_begin->setEnabled( false );
     ui->pb_player1_ready->setEnabled(true);
@@ -197,6 +186,9 @@ void roomDialog::clear_pushbutton()
 
     ui->pb_player1_cpu->setText("待托管");
     ui->pb_player2_cpu->setText("待托管");
+
+    if (clearBoard && ui->widget->isGameActive())
+        ui->widget->clear();
 }
 
 void roomDialog::slot_piecedown(int color, int x, int y)
@@ -401,6 +393,41 @@ void roomDialog::setrecordstatus(QString a, QString b ,int c,int d)
 void roomDialog::addmem(int id,QString name)
 {
    userlist.push_back(QPair<int,QString>(id,name));
+}
+
+void roomDialog::setMemberOffline(int id)
+{
+    int pos = 0;
+    for (auto it = userlist.begin(); it != userlist.end() && pos < 2; ++it, ++pos)
+    {
+        if ((*it).first != id)
+            continue;
+        QPixmap pm(":/icon/avatar_12.png");
+        QImage gray = pm.toImage().convertToFormat(QImage::Format_Grayscale8);
+        QPixmap offline = QPixmap::fromImage(gray);
+        if (pos == 0)
+            ui->lb_player1_icon->setPixmap(offline);
+        else
+            ui->lb_player2_icon->setPixmap(offline);
+        delPlayerReady(id);
+        break;
+    }
+}
+
+void roomDialog::setMemberOnline(int id)
+{
+    int pos = 0;
+    for (auto it = userlist.begin(); it != userlist.end() && pos < 2; ++it, ++pos)
+    {
+        if ((*it).first != id)
+            continue;
+        QPixmap pm(":/icon/avatar_12.png");
+        if (pos == 0)
+            ui->lb_player1_icon->setPixmap(pm.copy(0, 0, 230, 280));
+        else
+            ui->lb_player2_icon->setPixmap(pm.copy(0, 0, 230, 280));
+        break;
+    }
 }
 
 void roomDialog::loadnewPlayerInfo()

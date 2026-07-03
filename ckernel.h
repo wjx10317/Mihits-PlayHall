@@ -72,6 +72,7 @@ public slots:
     void slot_sendHeartbeat();
     void slot_disConnect();
     void slot_reconnectRs(unsigned int lSendIP, char *buf, int nlen);
+    void slot_opponentDisconnect(unsigned int lSendIP, char *buf, int nlen);
 public:
     void sendData(char*,int);
     void setnetpackmap();

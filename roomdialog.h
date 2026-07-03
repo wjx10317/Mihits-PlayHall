@@ -48,9 +48,11 @@ public:
 
 
 
-    void clear_pushbutton();
+    void clear_pushbutton(bool clearBoard = false);
 
     void addmem(int id,QString name);
+    void setMemberOffline(int id);
+    void setMemberOnline(int id);
 private slots:
     void on_pb_player1_ready_clicked(bool checked);
 

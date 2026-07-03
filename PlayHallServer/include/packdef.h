@@ -46,7 +46,11 @@
 #define _DEF_BUFFER         (4096)
 #define _DEF_CONTENT_SIZE	(1024)
 #define _MAX_SIZE           (40)
-
+#define _DEF_OFFLINE_SOCKFD (-1)
+#define IS_ONLINE_SOCKFD(fd) (fd>=0)
+#define _DEF_HEARTBEAT_INTERVAL_MS      5000    // 客户端发送间隔（仅文档，服务端不发送）
+#define _DEF_HEARTBEAT_TIMEOUT_SEC        30    // 服务端超时未收到则硬离线
+#define _DEF_HEARTBEAT_CHECK_INTERVAL_SEC 10    // 服务端扫描周期
 //自定义协议   先写协议头 再写协议结构
 //登录 注册 获取好友信息 添加好友 聊天 发文件 下线请求
 #define _DEF_PACK_BASE	(10000)
@@ -136,10 +140,6 @@ typedef struct STRU_LOGIN_RS
     char token[_MAX_SIZE];    // 重连凭证，后续断线重连时提交
 
 }STRU_LOGIN_RS;
-
-// USER_INFO.m_sockfd 离线标记（合法 TCP fd 在服务端均 >= 0；-1 与 socket() 失败返回值一致）
-#define _DEF_OFFLINE_SOCKFD  (-1)
-#define IS_ONLINE_SOCKFD(fd) ((fd) >= 0)
 
 typedef struct USER_INFO
 {
@@ -348,11 +348,6 @@ struct STRU_FIL_SINGLERECORD_RS
 // ============================================================
 // 断线重连相关协议
 // ============================================================
-// 心跳参数（客户端间隔 / 服务端超时判定）
-#define _DEF_HEARTBEAT_INTERVAL_MS      5000    // 客户端发送间隔
-#define _DEF_HEARTBEAT_TIMEOUT_SEC        60      // 超时未收到则硬离线（须重登）
-#define _DEF_HEARTBEAT_CHECK_INTERVAL_SEC 10      // 服务端扫描周期
-
 // 心跳
 #define DEF_FIL_HEARTBEAT               (_DEF_PACK_BASE + 25)
 // 重连
@@ -363,6 +358,7 @@ struct STRU_FIL_SINGLERECORD_RS
 
 // ========== 心跳包 ==========
 // 客户端每 _DEF_HEARTBEAT_INTERVAL_MS 发一次，纯保活，无需回复
+// 超过 _DEF_HEARTBEAT_TIMEOUT_SEC 未收到则 HandleDisconnect 硬离线
 typedef struct STRU_FIL_HEARTBEAT
 {
     STRU_FIL_HEARTBEAT():type(DEF_FIL_HEARTBEAT),userid(0),zoneid(0),roomid(0)
@@ -390,6 +386,7 @@ typedef struct STRU_FIL_RECONNECT_RQ
 // 服务端返回用户当前所处状态
 //   result=0: 重连失败(需重新登录)
 //   result=1: 成功，根据 zoneid/roomid/inGame 恢复界面
+// 对局中(inGame=1)由服务端逐条重放 STRU_FIL_PIECEDOWN，不使用快照字段
 typedef struct STRU_FIL_RECONNECT_RS
 {
     STRU_FIL_RECONNECT_RS():type(DEF_FIL_RECONNECT_RS),
@@ -399,17 +396,26 @@ typedef struct STRU_FIL_RECONNECT_RS
     int  result;                // 0=失败 1=成功
     int  zoneid;                // 当前专区（0=不在专区）
     int  roomid;                // 当前房间（0=不在房间）
-    int  inGame;                // 0=未开局 1=对局中（对局中由服务端逐条重放 PIECEDOWN）
+    int  inGame;                // 0=未开局 1=对局中
 }STRU_FIL_RECONNECT_RS;
 
+// 断线类型（STRU_FIL_OPPONENT_DISCONNECT.kind）
+#define DEF_DISCONNECT_SOFT     0   // TCP 软断线，可重连
+#define DEF_DISCONNECT_HARD     1   // 心跳超时硬断线
+#define DEF_DISCONNECT_REONLINE 2   // 软断线窗口内重连成功，恢复在线显示
+
 // ========== 对手掉线通知 ==========
-// 一方掉线后，服务端发给房间内剩余用户
+// kind=SOFT:   host/player 通知置灰；spec 不发送
+// kind=HARD:   等同 LEAVE_ROOM_RQ 角色转换；清 room_cache；spec 静默移除
+// kind=REONLINE: 软断窗口内重连成功，恢复头像；不发 ROOM_MEMBER 避免重复 addmem
 typedef struct STRU_FIL_OPPONENT_DISCONNECT
 {
     STRU_FIL_OPPONENT_DISCONNECT():type(DEF_FIL_OPPONENT_DISCONNECT),
-        userid(0),roomid(0)
+        userid(0),roomid(0),status(_spec),kind(DEF_DISCONNECT_SOFT)
     {}
     PackType type;
-    int userid;     // 掉线用户的 ID
+    int userid;
     int roomid;
+    int status;     // 掉线者身份 _host/_player/_spec
+    int kind;       // DEF_DISCONNECT_SOFT / HARD / REONLINE
 }STRU_FIL_OPPONENT_DISCONNECT;

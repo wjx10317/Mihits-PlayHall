@@ -80,6 +80,7 @@ public:
     void releasepiece(QPair<int,int>);
     void reloadpiece(QPair<int,int> tmp);
     void setSpectating(bool spectating);
+    bool isGameActive() const { return !isOver; }
 
 public slots:
     void slot_piecedown(int ,int,int);
