@@ -12,6 +12,9 @@
 #include"roomdialog.h"
 #include"roomitem.h"
 #include<QTimer>
+#include<QProcess>
+#include<QProgressDialog>
+#include"gamepackageupdater.h"
 class CKernel;
 typedef void (CKernel::*PFUN)(unsigned int,char*,int);
 #define NetPackMap(a)  CKernel::Get_Instance()->m_NetPackMap[ a - _DEF_PACK_BASE ]
@@ -76,6 +79,10 @@ public slots:
     // 外部游戏：版本校验
     void slot_sendGameVersionRq(int zoneid);
     void slot_gameVersionRs(unsigned int lSendIP, char *buf, int nlen);
+    // 外部游戏：专区编排（阶段4）
+    void slot_enterExternalZone(int zoneid);
+    void slot_externalUpdateFinished(bool ok, const QString &error, const GameManifest &manifest);
+    void slot_externalProcessFinished(int exitCode, QProcess::ExitStatus status);
 public:
     void sendData(char*,int);
     void setnetpackmap();
@@ -103,6 +110,17 @@ public:
     char m_reconnectToken[_MAX_SIZE];
     bool m_reconnecting;
     bool m_reconnectInGame;
+
+    // 外部游戏专区
+    GamePackageUpdater *m_gameUpdater = nullptr;
+    QProcess *m_externalProcess = nullptr;
+    QProgressDialog *m_externalProgress = nullptr;
+    int m_pendingExternalZone = 0;
+    QString m_pendingExeName;
+    bool m_externalLaunching = false;
+    void joinExternalZoneAndLaunch(const GameManifest &manifest);
+    void abortExternalEnter(const QString &reason);
+    QString gamesRootPath() const;
 
 signals:
 

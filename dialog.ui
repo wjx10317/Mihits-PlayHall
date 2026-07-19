@@ -101,9 +101,26 @@
     <set>Qt::AlignCenter</set>
    </property>
   </widget>
+  <widget class="QPushButton" name="pb_foogame">
+   <property name="geometry">
+    <rect>
+     <x>270</x>
+     <y>95</y>
+     <width>181</width>
+     <height>101</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>外部游戏</string>
+   </property>
+   <property name="flat">
+    <bool>true</bool>
+   </property>
+  </widget>
   <zorder>lb_main</zorder>
   <zorder>lb_fiveinline</zorder>
   <zorder>pb_fiveinline</zorder>
+  <zorder>pb_foogame</zorder>
  </widget>
  <resources>
   <include location="resource.qrc"/>

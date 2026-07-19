@@ -36,3 +36,8 @@ void Dialog::on_pb_fiveinline_clicked()
     this->hide();
 }
 
+void Dialog::on_pb_foogame_clicked()
+{
+    emit SIG_ENTER_EXTERNAL_ZONE(External_FooGame);
+}
+

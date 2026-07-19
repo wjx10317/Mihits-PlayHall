@@ -13,6 +13,10 @@ qRegisterMetaType<classname>("classname");
 #include<QFileInfo>
 #include<QApplication>
 #include<QKeyEvent>
+#include<QDir>
+#include<QProcess>
+#include<QProgressDialog>
+#include"gamepackageupdater.h"
 void CKernel::ConfigSet()
 {
     //获取配置文件的信息以及设置
@@ -74,6 +78,8 @@ CKernel::CKernel(QObject *parent):
             this,SLOT(slot_registerRq(QString,QString,QString)));
     connect(m_dialog,SIGNAL(SIG_JOINZONE(int)),
             this,SLOT(slot_joinzone(int)));
+    connect(m_dialog,SIGNAL(SIG_ENTER_EXTERNAL_ZONE(int)),
+            this,SLOT(slot_enterExternalZone(int)));
     connect(m_fiveinlinezone,SIGNAL(SIG_ZONE_JOINROOM(int)),
             this,SLOT(slot_joinroom(int)));
     connect(m_fiveinlinezone,SIGNAL(SIG_CLOSE()),
@@ -102,6 +108,24 @@ CKernel::CKernel(QObject *parent):
     qApp->installEventFilter(this);
     setnetpackmap();
 
+    m_gameUpdater = new GamePackageUpdater(this);
+    m_externalProcess = new QProcess(this);
+    connect(m_gameUpdater, &GamePackageUpdater::finished,
+            this, &CKernel::slot_externalUpdateFinished);
+    connect(m_gameUpdater, &GamePackageUpdater::statusMessage, this, [this](const QString &msg) {
+        if (m_externalProgress)
+            m_externalProgress->setLabelText(msg);
+    });
+    connect(m_gameUpdater, &GamePackageUpdater::progress, this,
+            [this](qint64 rec, qint64 total, const QString &) {
+                if (!m_externalProgress)
+                    return;
+                m_externalProgress->setMaximum(total > 0 ? static_cast<int>(total) : 0);
+                m_externalProgress->setValue(static_cast<int>(rec));
+            });
+    connect(m_externalProcess,
+            QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, &CKernel::slot_externalProcessFinished);
 }
 bool CKernel::eventFilter(QObject *obj, QEvent *event)
 {
@@ -243,7 +267,6 @@ void CKernel::slot_loginRs(unsigned int , char* buf , int)
 
 void CKernel::slot_joinzone(int zoneid)
 {
-    m_rqtimer.start(1000);
     m_zoneid =zoneid;
     STRU_JOIN_ZONE rq;
     rq.userid = m_id;
@@ -252,6 +275,7 @@ void CKernel::slot_joinzone(int zoneid)
     switch(zoneid)
     {
         case Five_In_Line:
+            m_rqtimer.start(1000);
             m_fiveinlinezone->show();
         break;
         default:
@@ -775,17 +799,152 @@ void CKernel::slot_sendGameVersionRq(int zoneid)
 void CKernel::slot_gameVersionRs(unsigned int, char *buf, int)
 {
     STRU_GAME_VERSION_RS* rs = (STRU_GAME_VERSION_RS*)buf;
+    if (!m_externalLaunching || rs->zoneid != m_pendingExternalZone)
+        return;
+
     if (rs->result != 1)
     {
-        qDebug() << "[GameVersion] fail zoneid=" << rs->zoneid;
+        abortExternalEnter(QString("版本查询失败 zoneid=%1").arg(rs->zoneid));
         return;
     }
-    // 阶段1：协议冒烟，后续阶段交给更新器/专区编排
-    qDebug() << "[GameVersion] ok"
-             << "zoneid=" << rs->zoneid
-             << "version=" << rs->serverVersion
-             << "exe_name=" << rs->exe_name
-             << "manifest_url=" << rs->manifest_url
-             << "note=" << rs->release_note;
+
+    m_pendingExeName = QString::fromLocal8Bit(rs->exe_name);
+    const QString manifestUrl = QString::fromLocal8Bit(rs->manifest_url);
+    if (m_externalProgress)
+        m_externalProgress->setLabelText(QString("更新中: %1").arg(rs->serverVersion));
+    m_gameUpdater->startUpdate(manifestUrl, gamesRootPath());
 }
+
+QString CKernel::gamesRootPath() const
+{
+    return QDir(QCoreApplication::applicationDirPath()).filePath("games");
+}
+
+void CKernel::slot_enterExternalZone(int zoneid)
+{
+    if (m_id == 0)
+        return;
+    if (m_externalLaunching || (m_externalProcess && m_externalProcess->state() != QProcess::NotRunning))
+    {
+        QMessageBox::about(m_dialog, "提示", "外部游戏正在运行或更新中");
+        return;
+    }
+    if (m_zoneid != 0)
+    {
+        QMessageBox::about(m_dialog, "提示", "已在其他专区，请先返回大厅");
+        return;
+    }
+
+    m_externalLaunching = true;
+    m_pendingExternalZone = zoneid;
+    m_pendingExeName.clear();
+
+    if (!m_externalProgress)
+    {
+        m_externalProgress = new QProgressDialog("准备更新…", "取消", 0, 0, m_dialog);
+        m_externalProgress->setWindowModality(Qt::ApplicationModal);
+        m_externalProgress->setMinimumDuration(0);
+        connect(m_externalProgress, &QProgressDialog::canceled, this, [this]() {
+            if (m_gameUpdater)
+                m_gameUpdater->cancel();
+            abortExternalEnter("已取消");
+        });
+    }
+    m_externalProgress->setMaximum(0);
+    m_externalProgress->setValue(0);
+    m_externalProgress->setLabelText("查询版本…");
+    m_externalProgress->show();
+
+    slot_sendGameVersionRq(zoneid);
+}
+
+void CKernel::abortExternalEnter(const QString &reason)
+{
+    m_externalLaunching = false;
+    m_pendingExternalZone = 0;
+    if (m_externalProgress)
+    {
+        m_externalProgress->hide();
+    }
+    if (!reason.isEmpty())
+        QMessageBox::warning(m_dialog, "外部游戏", reason);
+}
+
+void CKernel::slot_externalUpdateFinished(bool ok, const QString &error, const GameManifest &manifest)
+{
+    if (!m_externalLaunching)
+        return;
+
+    if (!ok)
+    {
+        const QString exePath = GamePackageUpdater::installDir(gamesRootPath(),
+                m_pendingExeName.isEmpty() ? manifest.exeName : m_pendingExeName)
+                + "/" + (m_pendingExeName.isEmpty() ? manifest.exeName : m_pendingExeName)
+                + ".exe";
+        const bool hasOld = QFileInfo::exists(exePath);
+        if (hasOld)
+        {
+            if (m_externalProgress)
+                m_externalProgress->hide();
+            const auto ret = QMessageBox::question(
+                m_dialog, "更新失败",
+                error + "\n是否仍使用本地旧版进入？",
+                QMessageBox::Yes | QMessageBox::No);
+            if (ret == QMessageBox::Yes)
+            {
+                GameManifest local = manifest;
+                if (local.exeName.isEmpty())
+                    local.exeName = m_pendingExeName;
+                joinExternalZoneAndLaunch(local);
+                return;
+            }
+        }
+        abortExternalEnter(error.isEmpty() ? "更新失败" : error);
+        return;
+    }
+
+    joinExternalZoneAndLaunch(manifest);
+}
+
+void CKernel::joinExternalZoneAndLaunch(const GameManifest &manifest)
+{
+    const QString exeName = manifest.exeName.isEmpty() ? m_pendingExeName : manifest.exeName;
+    const QString dir = GamePackageUpdater::installDir(gamesRootPath(), exeName);
+    const QString exePath = QDir(dir).filePath(exeName + ".exe");
+    if (!QFileInfo::exists(exePath))
+    {
+        abortExternalEnter(QString("找不到可执行文件: %1").arg(exePath));
+        return;
+    }
+
+    // 先 JoinZone，再藏大厅并启动
+    slot_joinzone(m_pendingExternalZone);
+    m_dialog->hide();
+    if (m_externalProgress)
+        m_externalProgress->hide();
+
+    m_externalProcess->setWorkingDirectory(dir);
+    m_externalProcess->start(exePath, QStringList());
+    if (!m_externalProcess->waitForStarted(5000))
+    {
+        slot_leavezone();
+        abortExternalEnter(QString("启动失败: %1").arg(m_externalProcess->errorString()));
+        return;
+    }
+
+    m_externalLaunching = false;
+    m_pendingExeName = exeName;
+}
+
+void CKernel::slot_externalProcessFinished(int, QProcess::ExitStatus)
+{
+    // 外部游戏进程结束：离开专区并显示大厅
+    if (m_zoneid != 0 && m_zoneid != Five_In_Line)
+        slot_leavezone();
+    else if (!m_dialog->isVisible())
+        m_dialog->show();
+    m_pendingExternalZone = 0;
+    m_externalLaunching = false;
+}
+
 

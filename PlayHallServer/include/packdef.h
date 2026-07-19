@@ -167,7 +167,7 @@ typedef struct USER_INFO
 #define DEF_JOIN_ROOM_RS (_DEF_PACK_BASE + 7 )
 #define DEF_ROOM_MEMBER (_DEF_PACK_BASE + 8 )
 #define DEF_LEAVE_ROOM_RQ (_DEF_PACK_BASE + 9)
-enum ENUM_PLAY_ZONE{Five_In_Line = 0x10,E_L_S,D_D_Z};
+enum ENUM_PLAY_ZONE{Five_In_Line = 0x10,E_L_S,D_D_Z, External_FooGame = 0x20};
 enum ENUM_ROOM_STATUS {_host,_player,_spec};
 //加入专区
 typedef struct STRU_JOIN_ZONE

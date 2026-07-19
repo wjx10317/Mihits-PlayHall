@@ -13,6 +13,7 @@ class Dialog : public QDialog
 signals:
     void SIG_CLOSE();
     void SIG_JOINZONE(int zoneid);
+    void SIG_ENTER_EXTERNAL_ZONE(int zoneid);
 public:
     Dialog(QWidget *parent = nullptr);
     ~Dialog();
@@ -20,6 +21,7 @@ public:
 
 private slots:
     void on_pb_fiveinline_clicked();
+    void on_pb_foogame_clicked();
 
 private:
     Ui::Dialog *ui;
