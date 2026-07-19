@@ -355,3 +355,44 @@ typedef struct STRU_FIL_OPPONENT_DISCONNECT
     int status;     // 掉线者身份 _host/_player/_spec
     int kind;       // DEF_DISCONNECT_SOFT / HARD / REONLINE
 }STRU_FIL_OPPONENT_DISCONNECT;
+
+// ============================================================
+// 外部游戏专区：版本校验（资源体走 HTTP manifest）
+// ============================================================
+#define DEF_GAME_VERSION_RQ             (_DEF_PACK_BASE + 29)
+#define DEF_GAME_VERSION_RS             (_DEF_PACK_BASE + 30)
+
+#define _DEF_URL_SIZE                   (512)
+#define _DEF_EXE_NAME_SIZE              (64)
+#define _DEF_VERSION_NOTE_SIZE          (256)
+
+typedef struct STRU_GAME_VERSION_RQ
+{
+    STRU_GAME_VERSION_RQ():type(DEF_GAME_VERSION_RQ),userid(0),zoneid(0)
+    {}
+    PackType type;
+    int userid;
+    int zoneid;
+}STRU_GAME_VERSION_RQ;
+
+// result=0 无此游戏/查询失败；result=1 成功
+typedef struct STRU_GAME_VERSION_RS
+{
+    STRU_GAME_VERSION_RS():type(DEF_GAME_VERSION_RS),
+        result(0),zoneid(0),needUpdate(0)
+    {
+        memset(serverVersion,0,sizeof(serverVersion));
+        memset(exe_name,0,sizeof(exe_name));
+        memset(manifest_url,0,sizeof(manifest_url));
+        memset(release_note,0,sizeof(release_note));
+    }
+    PackType type;
+    int  result;
+    int  zoneid;
+    int  needUpdate;
+    char serverVersion[_MAX_SIZE];
+    char exe_name[_DEF_EXE_NAME_SIZE];
+    char manifest_url[_DEF_URL_SIZE];
+    char release_note[_DEF_VERSION_NOTE_SIZE];
+}STRU_GAME_VERSION_RS;
+

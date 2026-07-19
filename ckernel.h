@@ -73,6 +73,9 @@ public slots:
     void slot_disConnect();
     void slot_reconnectRs(unsigned int lSendIP, char *buf, int nlen);
     void slot_opponentDisconnect(unsigned int lSendIP, char *buf, int nlen);
+    // 外部游戏：版本校验
+    void slot_sendGameVersionRq(int zoneid);
+    void slot_gameVersionRs(unsigned int lSendIP, char *buf, int nlen);
 public:
     void sendData(char*,int);
     void setnetpackmap();

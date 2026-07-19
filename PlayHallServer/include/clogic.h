@@ -53,6 +53,7 @@ public:
     void FIL_SingleRecordRq(sock_fd clientfd, char *szbuf, int nlen);
     void HeartBeatRq(sock_fd clientfd, char *szbuf, int nlen);
     void ReconnectRq(sock_fd clientfd, char *szbuf, int nlen);
+    void GameVersionRq(sock_fd clientfd, char *szbuf, int nlen);
     // Phase1: 定时扫描心跳，清理超时用户
     void CheckHeartBeat();
     void HandleDisconnect(int userid);

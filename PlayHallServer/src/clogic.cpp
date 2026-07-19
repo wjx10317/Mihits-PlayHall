@@ -27,6 +27,7 @@ void CLogic::setNetPackMap()
     NetPackMap(DEF_FIL_SINGLERECORD_RQ)     = &CLogic::FIL_SingleRecordRq;
     NetPackMap(DEF_FIL_HEARTBEAT)          = &CLogic::HeartBeatRq;
     NetPackMap(DEF_FIL_RECONNECT_RQ)       = &CLogic::ReconnectRq;
+    NetPackMap(DEF_GAME_VERSION_RQ)        = &CLogic::GameVersionRq;
 
 }
 
@@ -879,6 +880,38 @@ void CLogic::NotifyRoomHardDisconnect(int userid, USER_INFO* info)
     ClearRoomGameCache(roomid);
     RemoveUserFromRoomList(roomid, userid);
     info->m_roomid = 0;
+}
+
+void CLogic::GameVersionRq(sock_fd clientfd, char *szbuf, int)
+{
+    _DEF_COUT_FUNC_
+    STRU_GAME_VERSION_RQ* rq = (STRU_GAME_VERSION_RQ*)szbuf;
+    STRU_GAME_VERSION_RS rs;
+    rs.zoneid = rq->zoneid;
+
+    list<string> result;
+    vector<SqlParam> params;
+    params.push_back(SqlParam::FromInt(rq->zoneid));
+    const char* sql =
+        "select version, exe_name, manifest_url, release_note from t_game_pkg where zoneid = ?";
+    if (!m_sql->SelectPrepared(sql, params, 4, result) || result.size() < 4)
+    {
+        rs.result = 0;
+        SendData(clientfd, (char*)&rs, sizeof(rs));
+        return;
+    }
+
+    string version = result.front(); result.pop_front();
+    string exeName = result.front(); result.pop_front();
+    string manifestUrl = result.front(); result.pop_front();
+    string note = result.front(); result.pop_front();
+
+    rs.result = 1;
+    strncpy(rs.serverVersion, version.c_str(), sizeof(rs.serverVersion) - 1);
+    strncpy(rs.exe_name, exeName.c_str(), sizeof(rs.exe_name) - 1);
+    strncpy(rs.manifest_url, manifestUrl.c_str(), sizeof(rs.manifest_url) - 1);
+    strncpy(rs.release_note, note.c_str(), sizeof(rs.release_note) - 1);
+    SendData(clientfd, (char*)&rs, sizeof(rs));
 }
 
 // ============================================================

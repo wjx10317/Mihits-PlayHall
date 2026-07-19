@@ -147,6 +147,7 @@ void CKernel::setnetpackmap()
     m_NetPackMap[DEF_FIL_SINGLERECORD_RS - _DEF_PACK_BASE] = &CKernel::slot_deal_singlerecordrs;
     m_NetPackMap[DEF_FIL_RECONNECT_RS - _DEF_PACK_BASE] = &CKernel::slot_reconnectRs;
     m_NetPackMap[DEF_FIL_OPPONENT_DISCONNECT - _DEF_PACK_BASE] = &CKernel::slot_opponentDisconnect;
+    m_NetPackMap[DEF_GAME_VERSION_RS - _DEF_PACK_BASE] = &CKernel::slot_gameVersionRs;
 
 }
 void CKernel::sendData(char* buf , int nlen )
@@ -760,3 +761,31 @@ void CKernel::slot_disConnect()
         exit(0);
     }
 }
+
+void CKernel::slot_sendGameVersionRq(int zoneid)
+{
+    if (m_id == 0)
+        return;
+    STRU_GAME_VERSION_RQ rq;
+    rq.userid = m_id;
+    rq.zoneid = zoneid;
+    sendData((char*)&rq, sizeof(rq));
+}
+
+void CKernel::slot_gameVersionRs(unsigned int, char *buf, int)
+{
+    STRU_GAME_VERSION_RS* rs = (STRU_GAME_VERSION_RS*)buf;
+    if (rs->result != 1)
+    {
+        qDebug() << "[GameVersion] fail zoneid=" << rs->zoneid;
+        return;
+    }
+    // 阶段1：协议冒烟，后续阶段交给更新器/专区编排
+    qDebug() << "[GameVersion] ok"
+             << "zoneid=" << rs->zoneid
+             << "version=" << rs->serverVersion
+             << "exe_name=" << rs->exe_name
+             << "manifest_url=" << rs->manifest_url
+             << "note=" << rs->release_note;
+}
+
