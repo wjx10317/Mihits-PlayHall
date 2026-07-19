@@ -212,9 +212,22 @@ void CLogic::JoinRoomRq(sock_fd clientfd, char *szbuf, int)
 
     USER_INFO* info = nullptr;
     if (!m_mapfdtouserinfo.find(rq->userid, info))
+    {
+        rs.result = 0;
+        rs.status = _spec;
+        SendData(clientfd, (char*)&rs, sizeof(rs));
         return;
+    }
 
     if (info->m_roomid != 0 && info->m_roomid != (int)rq->roomid)
+    {
+        rs.result = 0;
+        rs.status = _spec;
+        SendData(clientfd, (char*)&rs, sizeof(rs));
+        return;
+    }
+
+    if (rq->roomid < 0 || rq->roomid >= static_cast<int>(m_roomList.size()))
     {
         rs.result = 0;
         rs.status = _spec;
@@ -275,15 +288,11 @@ void CLogic::JoinRoomRq(sock_fd clientfd, char *szbuf, int)
     pthread_mutex_unlock(&m_roomListlock);
     SendData(clientfd,(char*)&rs,sizeof(rs));
 
-    int loginid =rq->userid;
-    USER_INFO* info =nullptr;
-    if(!m_mapfdtouserinfo.find(loginid,info))
-        return ;
     info->m_roomid = rq->roomid;
 
     STRU_ROOM_MENBER loginrq;
     loginrq.status = rs.status;
-    loginrq.userid =loginid;
+    loginrq.userid = rq->userid;
     strcpy(loginrq.name,info->m_username);
     int status =-1;
     for(auto ite = tmplist.begin();ite!=tmplist.end();ite++)
@@ -893,7 +902,7 @@ void CLogic::CheckHeartBeat()
     pthread_mutex_lock(&m_heartbeatLock);
     for (auto& kv : m_heartbeatMap)
     {
-        if (now - kv.second > _DEF_HEARTBEAT_TIMEOUT_SEC)
+        if (now - kv.second >= _DEF_HEARTBEAT_TIMEOUT_SEC)
             timeoutUsers.push_back(kv.first);
     }
     pthread_mutex_unlock(&m_heartbeatLock);

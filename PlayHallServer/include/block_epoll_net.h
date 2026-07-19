@@ -20,6 +20,7 @@
 #include"Thread_pool.h"
 
 #define MAX_EVENTS 4096
+#define _DEF_MAX_PACK_BODY  (256 * 1024)  // 单包最大 payload，防止恶意长度
 using namespace  std;
 
 //阻塞IO epoll

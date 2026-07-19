@@ -166,8 +166,12 @@ void* Block_Epoll_Net::recv_task(void* arg)
         if(nRelReadNum <= 0)
             break;
 
+        if (nPackSize <= 0 || nPackSize > _DEF_MAX_PACK_BODY)
+            break;
+
         pSzBuf = new char[nPackSize];
         int nOffSet = 0;
+        int nBodyLen = nPackSize;
         nRelReadNum = 0;
         //接收包的数据
         while(nPackSize)
@@ -178,6 +182,12 @@ void* Block_Epoll_Net::recv_task(void* arg)
 
             nOffSet += nRelReadNum;
             nPackSize -= nRelReadNum;
+        }
+        if (nOffSet != nBodyLen)
+        {
+            delete[] pSzBuf;
+            pSzBuf = NULL;
+            break;
         }
         //接收和处理分离 跑线程池里其他线程处理 , 避免处理影响接收
         DataBuffer * buffer = new DataBuffer(ev->pNet , ev->fd , pSzBuf , nOffSet );
@@ -190,6 +200,11 @@ void* Block_Epoll_Net::recv_task(void* arg)
 
     }while(0);
 
+    if (pSzBuf)
+    {
+        delete[] pSzBuf;
+        pSzBuf = NULL;
+    }
     pthis->CloseFd(ev->fd, true);
     return NULL;
 
