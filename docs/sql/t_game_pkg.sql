@@ -11,15 +11,15 @@ CREATE TABLE IF NOT EXISTS t_game_pkg (
                              ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 示例行（按内网 Nginx 地址修改后插入）
--- zoneid=0x20(32) 避开五子棋 0x10
+-- Malody-Martix（zoneid=0x20=32，避开五子棋 0x10）
+-- 部署后请将 manifest_url 改为实际 Nginx 内网地址
 INSERT INTO t_game_pkg (zoneid, version, exe_name, manifest_url, release_note)
 VALUES (
   32,
   '1.0.0',
-  'FooGame',
-  'http://192.168.1.50/games/FooGame/manifest.json',
-  'external game demo'
+  'melody_matrix',
+  'http://192.168.1.50/games/melody_matrix/manifest.json',
+  'Malody-Martix rhythm game'
 ) ON DUPLICATE KEY UPDATE
   version = VALUES(version),
   exe_name = VALUES(exe_name),

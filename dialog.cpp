@@ -38,6 +38,6 @@ void Dialog::on_pb_fiveinline_clicked()
 
 void Dialog::on_pb_foogame_clicked()
 {
-    emit SIG_ENTER_EXTERNAL_ZONE(External_FooGame);
+    emit SIG_ENTER_EXTERNAL_ZONE(External_Malody);
 }
 

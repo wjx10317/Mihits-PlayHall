@@ -1,1 +1,0 @@
-FooGame demo resource v1.0.0

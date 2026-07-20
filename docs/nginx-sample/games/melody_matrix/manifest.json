@@ -1,0 +1,158 @@
+{
+  "zoneid": 32,
+  "version": "1.0.0",
+  "exe_name": "melody_matrix",
+  "baseUrl": "http://192.168.1.50/games/melody_matrix/",
+  "files": [
+    {
+      "path": "melody_matrix.exe",
+      "size": 5652480,
+      "md5": "8c1ae093f3c5a5c4d6213710979f7052"
+    },
+    {
+      "path": "res/background.png",
+      "size": 1104,
+      "md5": "dd2ba3647163c65466377d216e948d81"
+    },
+    {
+      "path": "res/holdpush_0.png",
+      "size": 1274,
+      "md5": "760389bb12124703063c73e46dda531a"
+    },
+    {
+      "path": "res/holdpush_10.png",
+      "size": 2667,
+      "md5": "b6b431a667c7cb78d4e2b3a4c96bbafd"
+    },
+    {
+      "path": "res/holdpush_100.png",
+      "size": 1256,
+      "md5": "5f5f369ce6ee28056344b59ae06b3a58"
+    },
+    {
+      "path": "res/holdpush_20.png",
+      "size": 3808,
+      "md5": "70a4ebfcf85375f4d87e2ad5e030337f"
+    },
+    {
+      "path": "res/holdpush_30.png",
+      "size": 3843,
+      "md5": "f57c3906ed5d7b2d7e2b9d3d11e7eb01"
+    },
+    {
+      "path": "res/holdpush_40.png",
+      "size": 4845,
+      "md5": "efd08b7cf2b5333f630415ec9a463577"
+    },
+    {
+      "path": "res/holdpush_50.png",
+      "size": 4440,
+      "md5": "5dda4120513194a6a8e13f44caa183f9"
+    },
+    {
+      "path": "res/holdpush_60.png",
+      "size": 4867,
+      "md5": "1896e7e6ea5f774de71837d01c739b34"
+    },
+    {
+      "path": "res/holdpush_70.png",
+      "size": 5998,
+      "md5": "2bb415d0332200c33854b422c205953d"
+    },
+    {
+      "path": "res/holdpush_80.png",
+      "size": 5998,
+      "md5": "e1c83fcbb6f01081eee16c214b1cf5d9"
+    },
+    {
+      "path": "res/holdpush_90.png",
+      "size": 6191,
+      "md5": "0e172cb6ad0f6ea994fc20f78024f09a"
+    },
+    {
+      "path": "res/holdpush_ring.png",
+      "size": 1274,
+      "md5": "760389bb12124703063c73e46dda531a"
+    },
+    {
+      "path": "res/icon.png",
+      "size": 258619,
+      "md5": "d1eb65e7a06f735f84caa4598e4f6923"
+    },
+    {
+      "path": "res/menuclick.wav",
+      "size": 144214,
+      "md5": "f271304dca9a378ebe389eb95c432b60"
+    },
+    {
+      "path": "res/menuhit.wav",
+      "size": 361038,
+      "md5": "f949bdb685caae5077cee818b763ecec"
+    },
+    {
+      "path": "res/normal-hitnormal.wav",
+      "size": 10470,
+      "md5": "e64630eb53e15c7156a4c9158614490b"
+    },
+    {
+      "path": "res/normal-slidertick.wav",
+      "size": 94284,
+      "md5": "2ab46a267d84cde3c70757e0faaeed8c"
+    },
+    {
+      "path": "res/overlay.png",
+      "size": 1248,
+      "md5": "d89e3c6b3ede6a7c5eda29a72bbf73f1"
+    },
+    {
+      "path": "res/slider.png",
+      "size": 7292,
+      "md5": "d83bfc7a550ac775689ca0f66f468cee"
+    },
+    {
+      "path": "res/sliderpush_0.png",
+      "size": 2217,
+      "md5": "f1491ed87c8c9a38a393c006d5249ea2"
+    },
+    {
+      "path": "res/sliderpush_100.png",
+      "size": 3889,
+      "md5": "68ac31ef9f708be852b49dd654879e2b"
+    },
+    {
+      "path": "res/sliderpush_25.png",
+      "size": 5008,
+      "md5": "dcf1c9c9285e2f199f11a85c33e09271"
+    },
+    {
+      "path": "res/sliderpush_50.png",
+      "size": 5143,
+      "md5": "490866623e6492d9407dd20cc4ee59cc"
+    },
+    {
+      "path": "res/sliderpush_75.png",
+      "size": 5583,
+      "md5": "c125b6d40ced67f056227c4f6f45ee26"
+    },
+    {
+      "path": "res/sliderpush_arc.png",
+      "size": 33727,
+      "md5": "cd4909a3474202775a2a4d7b7d6c03ec"
+    },
+    {
+      "path": "res/sliderpush_ring.png",
+      "size": 2217,
+      "md5": "f1491ed87c8c9a38a393c006d5249ea2"
+    },
+    {
+      "path": "res/tap.png",
+      "size": 6496,
+      "md5": "b3870cd59bf1f6aafd64b95871c79560"
+    },
+    {
+      "path": "SDL2.dll",
+      "size": 1606144,
+      "md5": "ab59a7c947c4e432ac428e35e1993f23"
+    }
+  ]
+}

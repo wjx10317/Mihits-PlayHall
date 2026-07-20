@@ -111,7 +111,7 @@
     </rect>
    </property>
    <property name="text">
-    <string>外部游戏</string>
+    <string>Malody</string>
    </property>
    <property name="flat">
     <bool>true</bool>
