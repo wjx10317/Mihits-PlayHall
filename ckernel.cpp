@@ -340,7 +340,7 @@ void CKernel::slot_deal_readydata(unsigned int lSendIP , char* buf , int nlen)
     int type = *(int*)buf;
     if(type>=_DEF_PACK_BASE&&type<_DEF_PACK_BASE+_DEF_PACK_COUNT)
     {
-        auto it = m_latencyExpectTicks.find(type);
+        auto it = m_latencyExpectTicks.find(type);//注意，QMap的迭代器直接指向value，与常规map不一样
         if (it != m_latencyExpectTicks.end() && !it->isEmpty())
         {
             const qint64 startTick = it->first();

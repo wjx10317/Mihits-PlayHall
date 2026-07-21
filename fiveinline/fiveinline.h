@@ -8,25 +8,13 @@
 #include<QTimer>
 #include<QStack>
 #include<QPair>
+#include"def.h"
+#include"ai_worker.h"
+
 QT_BEGIN_NAMESPACE
 namespace Ui { class FiveInLine; }
 QT_END_NAMESPACE
 
-// 界面是 580*580 固定
-
-// 外边距
-#define FIL_MARGIN_HEIGHT     (50)
-#define FIL_MARGIN_WIDTH      (50)
-// 行列数 五子棋规范为 15*15
-#define FIL_COLS              (15)
-#define FIL_ROWS              (15)
-// 边和边之间的边距
-#define FIL_SPACE   (30)
-// 棋子的大小
-#define FIL_PIECE_SIZE  (28)
-// 棋盘边缘缩进的距离
-#define FIL_DISTANCE      (10)
-#define MAX_DEPTH (4)
 
 // 1. 首先绘制棋盘 网格线 棋子
 #include<vector>
@@ -57,6 +45,7 @@ signals:
     // 如果没有推荐，坐标为-1
     void SIG_AI_BEST_MOVES(int nextPlayer, int best1_x, int best1_y, int best1_score,
                             int best2_x, int best2_y, int best2_score);
+    void SIG_SEND_TASK(AiWorker::Task t);
 public:
     FiveInLine(QWidget *parent = nullptr);
     ~FiveInLine();
@@ -100,11 +89,8 @@ private:
     bool isOver;
     int m_status;
     bool iswaitexist;
-    // 判断输赢时需要的方向
-    enum enum_direction{ d_z , d_y , d_s , d_x , d_zs , d_yx , d_zx , d_ys ,d_count};
-    //根据方向对坐标的偏移 每次是一个单位
-    int dx[ d_count ] = {-1, 1, 0, 0, -1, 1, -1, 1};
-    int dy[ d_count ] = {0, 0, -1, 1, -1, 1, 1, -1};
+
+
     QStack<QPair<int,int>>PlacedStep;
     QStack<QPair<int,int>>NotPlacedStep;
     QPair<int,int>waittoplacestep;
@@ -126,24 +112,16 @@ private:
     bool m_aiBest2Valid = false;
 
     // 高级AI方法
-    void findBestMove(int &bestX, int &bestY, int player, int depth);
-    void piecedownBybetterCpu();
-    void getNeedHandlePos(std::vector<std::pair<int, int>> &copyEveryStep,
-                          std::vector<std::pair<int, int>> &candidates,
-                          std::vector<std::vector<int>> &board);
-    bool isWin(int x, int y, std::vector<std::vector<int> > &board);
-    int minmax(std::vector<std::vector<int>>& copyBoard , std::vector<std::pair<int, int>>& copyEveryStep,
-               int depth , int alpha , int beta , bool isMaximizing, int player);
-    int evaluateBoard( int color, std::vector<std::vector<int>>& board);
-    int evaluateBoard(std::vector<std::vector<int>>& board);
 
-    // 获取前N最佳位置（用于回放评估）
-    void getTopNMoves(int n, int player, std::vector<std::pair<int, int>>& topMoves,
-                     std::vector<int>& scores);
+    void piecedownBybetterCpu();
     void notifyAIBestMoves();
 
     // 低级AI（已保留但未使用）
     void piecedownByBasicCpu();
+    QThread* m_aiThread;
+    AiWorker* m_aiWorker;
+    quint64 m_aiJobId;
+    bool m_aiBusy;
 
 private slots:
     void on_left_clicked();
@@ -151,8 +129,8 @@ private slots:
     void on_right_clicked();
     void on_max_right_clicked();
     void slot_notifyAIBestMoves(); // 防抖后真正执行AI评估
+    void slot_onAiResult(AiWorker::Result r);
 
-public:
-    enum ENUM_BLACK_OR_WHITE{Black=0,White,None};
+
 };
 #endif // FIVEINLINE_H

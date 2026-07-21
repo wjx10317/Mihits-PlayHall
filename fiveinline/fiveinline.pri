@@ -14,6 +14,7 @@ SOURCES += \
 
 HEADERS += \
     $$PWD/ai_worker.h \
+    $$PWD/def.h \
     $$PWD/fiveinline.h
 
 FORMS += \

@@ -76,7 +76,7 @@ void roomDialog::setUserStatus(int status)
 {
     m_status = status;
 //需要修改
-    ui->widget->setselfstatus( m_status == _host?FiveInLine::Black:FiveInLine::White );
+    ui->widget->setselfstatus( m_status == _host?Black:White );
     ui->widget->setSpectating( m_status == _spec );
 
     // 玩家身份进入时隐藏AI推荐标签，观战时显示
@@ -237,7 +237,7 @@ void roomDialog::slot_updateAIBestMoves(int nextPlayer, int best1_x, int best1_y
         return;
 
     // 显示AI首选位置
-    QString playerColor = (nextPlayer == FiveInLine::Black) ? "黑棋" : "白棋";
+    QString playerColor = (nextPlayer == Black) ? "黑棋" : "白棋";
     QString best1 = QString("AI推荐%1: (%2,%3) 分数:%4")
                     .arg(playerColor)
                     .arg(best1_x).arg(best1_y).arg(best1_score);
@@ -266,11 +266,11 @@ void roomDialog::slot_judgewin(int color)
         return;
     }
     QString res;
-    if(m_status == _host&&color==FiveInLine::Black)
+    if(m_status == _host&&color==Black)
     {
         res = QString("你赢了");
     }
-    else if(m_status == _player&&color==FiveInLine::White)
+    else if(m_status == _player&&color==White)
     {
         res = QString("你赢了");
     }
@@ -334,14 +334,14 @@ void roomDialog::on_pb_player1_cpu_clicked(bool )
         {
             emit SIG_PLAYBYCPUBEGIN(0x10,m_roomid,(*it).first);
 
-            ui->widget->setcpucolor(FiveInLine::Black);
+            ui->widget->setcpucolor(Black);
 
             ui->widget->piecedownbycpu();
         }
         else
         {
             emit SIG_PLAYBYCPUEND(0x10,m_roomid,(*it).first);
-            ui->widget->setcpucolor(FiveInLine::None);
+            ui->widget->setcpucolor(None);
         }
     }
 }
@@ -356,14 +356,14 @@ void roomDialog::on_pb_player2_cpu_clicked(bool )
         {
             emit SIG_PLAYBYCPUBEGIN(0x10,m_roomid,(*it).first);
 
-            ui->widget->setcpucolor(FiveInLine::White);
+            ui->widget->setcpucolor(White);
 
             ui->widget->piecedownbycpu();
         }
         else
         {
             emit SIG_PLAYBYCPUEND(0x10,m_roomid,(*it).first);
-            ui->widget->setcpucolor(FiveInLine::None);
+            ui->widget->setcpucolor(None);
         }
     }
 }
@@ -437,9 +437,9 @@ void roomDialog::setrecordstatus(QString a, QString b ,int c,int d)
     m_status = _spec;
     // 与正常开局一致：清盘 + isOver=false + 回合归零，避免回放落子颜色/回合错乱
     ui->widget->slot_startgame();
-    ui->widget->setselfstatus(FiveInLine::Black); // 仅占位；观战不落子
+    ui->widget->setselfstatus(Black); // 仅占位；观战不落子
     ui->widget->setSpectating(true);
-    ui->widget->setcpucolor(FiveInLine::None);
+    ui->widget->setcpucolor(None);
     ui->lb_ai_best1->setVisible(true);
     ui->lb_ai_best2->setVisible(true);
 }
