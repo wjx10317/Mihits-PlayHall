@@ -1,0 +1,11 @@
+{
+  "host": "192.168.215.132",
+  "port": 22,
+  "user": "mihits",
+  "password": "YOUR_SSH_PASSWORD",
+  "remote_src": "/home/mihits/PlayHall/PlayHallServer",
+  "remote_build": "/home/mihits/PlayHall/build-PlayHallServer-Desktop_Qt_5_9_9_GCC_64bit-Debug",
+  "ld_library_path": "/home/mihits/Qt5.9.9/5.9.9/gcc_64/lib",
+  "server_port": 8000,
+  "watch_debounce_sec": 1.0
+}

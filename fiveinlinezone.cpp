@@ -42,8 +42,8 @@ void fiveinlinezone::addrecord(QString time, QString idA, QString idB)
 
 void fiveinlinezone::hidelist()
 {
-    m_list->hide();
     m_list->clearlist();
+    m_list->hide();
 }
 
 std::vector<roomitem *> &fiveinlinezone::getvecroomitem()
@@ -51,17 +51,15 @@ std::vector<roomitem *> &fiveinlinezone::getvecroomitem()
     return m_vecroomitem;
 }
 
-
-
 fiveinlinezone::~fiveinlinezone()
 {
     delete ui;
 }
 
-
-
 void fiveinlinezone::on_pb_recordlist_clicked()
 {
+    // 每次打开先清空，避免上次残留（尤其是看过详情后 hidelist 未删控件）
+    m_list->clearlist();
     m_list->show();
     emit SIG_ALLRECORD();
 }

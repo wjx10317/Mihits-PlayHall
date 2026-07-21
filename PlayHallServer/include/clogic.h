@@ -54,6 +54,7 @@ public:
     void HeartBeatRq(sock_fd clientfd, char *szbuf, int nlen);
     void ReconnectRq(sock_fd clientfd, char *szbuf, int nlen);
     void GameVersionRq(sock_fd clientfd, char *szbuf, int nlen);
+    void LogoutRq(sock_fd clientfd, char *szbuf, int nlen);
     // Phase1: 定时扫描心跳，清理超时用户
     void CheckHeartBeat();
     void HandleDisconnect(int userid);
@@ -63,6 +64,7 @@ public:
     bool comparebcrypt(const char* src,const char* dst);
 
 private:
+    bool GetUserIdByFd(sock_fd clientfd, int& userid);
     int  GetRoomMemberStatus(int roomid, int userid);
     void SendToRoomOnline(int roomid, int excludeUserid, char* buf, int nlen);
     void RemoveUserFromRoomList(int roomid, int userid);

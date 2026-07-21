@@ -4,9 +4,31 @@
 #include<QMessageBox>
 #include<QDebug>
 #include<QImage>
+#include<QBitmap>
+
+namespace {
+QPixmap avatarPixmapNormal()
+{
+    // 与 setHostInfo / setPlayerInfo 同一裁剪
+    return QPixmap(":/icon/avatar_12.png").copy(0, 0, 230, 280);
+}
+
+// Bitmap 置黑：原图 mask 保留外形，内容填黑
+QPixmap avatarPixmapOffline()
+{
+    QPixmap pm = avatarPixmapNormal();
+    QBitmap mask = pm.mask();
+    if (mask.isNull())
+        mask = pm.createHeuristicMask();
+    pm.fill(Qt::black);
+    pm.setMask(mask);
+    return pm;
+}
+} // namespace
+
 roomDialog::roomDialog(QWidget *parent) :
     QDialog(parent),
-    ui(new Ui::roomDialog),m_roomid(0)
+    ui(new Ui::roomDialog),m_roomid(0),m_status(_player),record_flag(0)
 {
     ui->setupUi(this);
     ui->pb_begin->setEnabled(false);
@@ -31,15 +53,16 @@ void roomDialog::setinfo(int roomid)
 
 void roomDialog::setHostInfo(int id, QString name)
 {
+    Q_UNUSED(id);
     ui->lb_player1_name ->setText(name);
-    ui->lb_player1_icon->setPixmap(QPixmap(":/icon/avatar_12.png").copy(0,0,230,280));
+    ui->lb_player1_icon->setPixmap(avatarPixmapNormal());
 }
 
 void roomDialog::setPlayerInfo(int id, QString name)
 {
+    Q_UNUSED(id);
     ui->lb_player2_name ->setText(name);
-    ui->lb_player2_icon->setPixmap(QPixmap(":/icon/avatar_12.png").copy(0,0,230,280));
-
+    ui->lb_player2_icon->setPixmap(avatarPixmapNormal());
 }
 
 void roomDialog::setPlayerInfotoHost()
@@ -67,13 +90,15 @@ void roomDialog::closeEvent(QCloseEvent *event)
     if( QMessageBox::question( this , "退出房间提示" , "是否退出房间?" )
                           == QMessageBox::Yes ){
         clear_pushbutton();
-        if(!record_flag)
-        emit SIG_CLOSE();
-        else
+        // 回看录像：只回专区，不发离房包；真实在房：SIG_CLOSE → slot_leaveroom 发包并清状态
+        if (record_flag)
         {
-
             record_flag = false;
             emit SIG_SHOWBACK();
+        }
+        else
+        {
+            emit SIG_CLOSE();
         }
         event->accept();
     }else{
@@ -90,16 +115,20 @@ void roomDialog::clearroom()
     ui->lb_player2_icon->setPixmap(QPixmap(":/icon/slotwait.png"));
 
     clear_pushbutton();
+    ui->pb_player1_cpu->show();
+    ui->pb_player2_cpu->show();
     ui->widget->clear();
     // 重置时隐藏AI推荐
     ui->lb_ai_best1->setVisible(false);
     ui->lb_ai_best2->setVisible(false);
-    //聊天窗口清空
+    ui->tb_chatshow->clear();
+    ui->le_chat->clear();
 
     //后台数据
     m_roomid = 0;
     userlist.clear();
     m_status = _player;
+    record_flag = false;
 }
 
 void roomDialog::clearPlayerInfo()
@@ -165,7 +194,11 @@ void roomDialog::setGameStart()
      ui->pb_player1_ready->hide();
      ui->pb_player2_ready->hide();
      ui->pb_begin->hide();
+     // slot_startgame/clear 会清 m_isSpectating；观战身份需保留
+     const bool keepSpec = (m_status == _spec);
      ui->widget->slot_startgame();
+     if (keepSpec)
+         ui->widget->setSpectating(true);
 }
 
 void roomDialog::clear_pushbutton(bool clearBoard)
@@ -226,6 +259,12 @@ void roomDialog::slot_updateAIBestMoves(int nextPlayer, int best1_x, int best1_y
 
 void roomDialog::slot_judgewin(int color)
 {
+    // 录像回放：只更新文案，不弹窗、不清 UI，避免打断后续重放包
+    if (record_flag)
+    {
+        ui->widget->setSpectating(true);
+        return;
+    }
     QString res;
     if(m_status == _host&&color==FiveInLine::Black)
     {
@@ -379,13 +418,28 @@ void roomDialog::rmmem(int id)
 
 void roomDialog::setrecordstatus(QString a, QString b ,int c,int d)
 {
+    // 进回看前先清房间残留控件（准备/开始/托管/聊天/成员）
+    userlist.clear();
+    clear_pushbutton();
+    ui->pb_player1_ready->hide();
+    ui->pb_player2_ready->hide();
+    ui->pb_begin->hide();
+    ui->pb_player1_cpu->hide();
+    ui->pb_player2_cpu->hide();
+    ui->tb_chatshow->clear();
+    ui->le_chat->clear();
+    ui->lb_ai_best1->setText("");
+    ui->lb_ai_best2->setText("");
+
     setHostInfo(c,a);
     setPlayerInfo(d,b);
     record_flag = true;
     m_status = _spec;
-    ui->widget->clear();
+    // 与正常开局一致：清盘 + isOver=false + 回合归零，避免回放落子颜色/回合错乱
+    ui->widget->slot_startgame();
+    ui->widget->setselfstatus(FiveInLine::Black); // 仅占位；观战不落子
     ui->widget->setSpectating(true);
-    // 回看模式显示AI推荐
+    ui->widget->setcpucolor(FiveInLine::None);
     ui->lb_ai_best1->setVisible(true);
     ui->lb_ai_best2->setVisible(true);
 }
@@ -402,9 +456,7 @@ void roomDialog::setMemberOffline(int id)
     {
         if ((*it).first != id)
             continue;
-        QPixmap pm(":/icon/avatar_12.png");
-        QImage gray = pm.toImage().convertToFormat(QImage::Format_Grayscale8);
-        QPixmap offline = QPixmap::fromImage(gray);
+        const QPixmap offline = avatarPixmapOffline();
         if (pos == 0)
             ui->lb_player1_icon->setPixmap(offline);
         else
@@ -421,11 +473,11 @@ void roomDialog::setMemberOnline(int id)
     {
         if ((*it).first != id)
             continue;
-        QPixmap pm(":/icon/avatar_12.png");
+        const QPixmap online = avatarPixmapNormal();
         if (pos == 0)
-            ui->lb_player1_icon->setPixmap(pm.copy(0, 0, 230, 280));
+            ui->lb_player1_icon->setPixmap(online);
         else
-            ui->lb_player2_icon->setPixmap(pm.copy(0, 0, 230, 280));
+            ui->lb_player2_icon->setPixmap(online);
         break;
     }
 }
@@ -440,7 +492,7 @@ void roomDialog::loadnewPlayerInfo()
         return;
 
     ui->lb_player2_name->setText(((*ite).second));
-    ui->lb_player2_icon->setPixmap(QPixmap(":/icon/avatar_12.png").copy(0,0,230,280));
+    ui->lb_player2_icon->setPixmap(avatarPixmapNormal());
 
 
 }

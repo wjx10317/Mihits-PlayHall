@@ -21,7 +21,8 @@ public:
 
 private slots:
     void on_pb_fiveinline_clicked();
-    void on_pb_foogame_clicked();
+
+    void on_pb_Melody_clicked();
 
 private:
     Ui::Dialog *ui;

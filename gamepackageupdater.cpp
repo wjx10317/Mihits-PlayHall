@@ -102,6 +102,9 @@ void GamePackageUpdater::startUpdate(const QString &manifestUrl, const QString &
 
     emit statusMessage(QString("下载清单: %1").arg(manifestUrl));
     QNetworkRequest req{QUrl(manifestUrl)};
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+    req.setTransferTimeout(15000); // 清单连接/传输超时 15s，避免长时间卡住
+#endif
     m_reply = m_nam.get(req);
     connect(m_reply, &QNetworkReply::finished, this, &GamePackageUpdater::onManifestFinished);
 }
@@ -131,7 +134,8 @@ void GamePackageUpdater::onManifestFinished()
     }
     if (reply->error() != QNetworkReply::NoError)
     {
-        fail(QString("清单下载失败: %1").arg(reply->errorString()));
+        fail(QString("清单下载失败: %1\nURL: %2")
+                 .arg(reply->errorString(), m_manifestUrl));
         return;
     }
 
@@ -229,6 +233,9 @@ void GamePackageUpdater::downloadNext()
     emit progress(m_doneDownloadBytes, m_totalDownloadBytes, f.path);
 
     QNetworkRequest req{url};
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+    req.setTransferTimeout(60000);
+#endif
     m_reply = m_nam.get(req);
     connect(m_reply, &QNetworkReply::downloadProgress, this,
             [this](qint64 rec, qint64) {

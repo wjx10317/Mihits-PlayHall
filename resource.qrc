@@ -7,5 +7,6 @@
         <file>face/btn_avatar_a2.png</file>
         <file>icon/slotwait.png</file>
         <file>icon/avatar_12.png</file>
+        <file>tx/icon.png</file>
     </qresource>
 </RCC>

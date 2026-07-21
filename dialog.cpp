@@ -35,8 +35,7 @@ void Dialog::on_pb_fiveinline_clicked()
     emit SIG_JOINZONE(Five_In_Line);
     this->hide();
 }
-
-void Dialog::on_pb_foogame_clicked()
+void Dialog::on_pb_Melody_clicked()
 {
     emit SIG_ENTER_EXTERNAL_ZONE(External_Malody);
 }

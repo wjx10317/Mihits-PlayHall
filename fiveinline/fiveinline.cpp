@@ -6,7 +6,7 @@
 FiveInLine::FiveInLine(QWidget *parent)
     : QWidget(parent),
       ui(new Ui::FiveInLine),m_board(FIL_ROWS,std::vector<int>(FIL_COLS,2/*2表示无*/)),
-      m_movePoint(0,0),m_isMove_fl(false),m_turns(0),isOver(false),m_status(Black),iswaitexist(false),waittoplacestep(QPair<int,int>(-1,-1)),m_cpucolor(None),
+      m_movePoint(0,0),m_isMove_fl(false),m_turns(0),m_curturns(0),isOver(false),m_status(Black),iswaitexist(false),waittoplacestep(QPair<int,int>(-1,-1)),m_cpucolor(None),
       m_lastPos(0,0),m_isSpectating(false)
 {
     ui->setupUi(this);
@@ -126,6 +126,8 @@ void FiveInLine::paintEvent(QPaintEvent *event)
 
 void FiveInLine::mousePressEvent(QMouseEvent *event)
 {
+    if(!NotPlacedStep.empty()||iswaitexist)
+        goto quit;
     if(isOver)
         goto quit;
     if(m_isSpectating)
@@ -140,6 +142,8 @@ quit:
 
 void FiveInLine::mouseMoveEvent(QMouseEvent *event)
 {
+    if(!NotPlacedStep.empty()||iswaitexist)
+        goto quit;
     if(isOver)
         goto quit;
     if(m_isSpectating)
@@ -161,6 +165,8 @@ void FiveInLine::mouseReleaseEvent(QMouseEvent *event)
     int y;
     float col = (float)event->pos().x();
     float row = (float)event->pos().y();
+    if(!NotPlacedStep.empty()||iswaitexist)
+        goto quit;
     if(isOver)
         goto quit;
     if(m_isSpectating)
@@ -213,6 +219,13 @@ bool FiveInLine::isCrossLine(int x , int y)
 
 void FiveInLine::slot_piecedown(int turns, int x, int y)
 {
+    if (turns != m_turns)
+    {
+        QMessageBox::warning(this, QString::fromUtf8("提示"),
+                             QString::fromUtf8("落子数据异常 turns=%1 m_turns=%2")
+                                 .arg(turns).arg(m_turns));
+        return;
+    }
     if(m_board[x][y]==None)
     {
         if(!NotPlacedStep.empty())
@@ -233,8 +246,10 @@ void FiveInLine::slot_piecedown(int turns, int x, int y)
             if(iswaitexist)
             {
                 m_board[waittoplacestep.first][waittoplacestep.second] = None;
+                iswaitexist=false;
             }
             emit SIG_PLAYERWIN((turns)%2);
+
         }else
         {
             if( m_cpucolor != getTurns()%2 ){
@@ -269,8 +284,6 @@ void FiveInLine::slot_piecedown(int turns, int x, int y)
                  m_curturns--;
              }
         }
-
-
         // 自动触发AI评估（局势已变化）
        notifyAIBestMoves();
     }
@@ -335,6 +348,7 @@ void FiveInLine::clear()
     //状态位
     isOver = true;
     m_turns = Black;
+    m_curturns =0;
     m_isMove_fl = false;
     m_cpucolor =None;
     m_lastPos = QPoint(); // 重置最后一步位置

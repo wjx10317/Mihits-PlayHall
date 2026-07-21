@@ -18,7 +18,7 @@ VALUES (
   32,
   '1.0.0',
   'melody_matrix',
-  'http://192.168.1.50/games/melody_matrix/manifest.json',
+  'http://192.168.215.132/games/melody_matrix/manifest.json',
   'Malody-Martix rhythm game'
 ) ON DUPLICATE KEY UPDATE
   version = VALUES(version),

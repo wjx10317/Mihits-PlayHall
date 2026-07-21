@@ -14,6 +14,11 @@
 #include<QTimer>
 #include<QProcess>
 #include<QProgressDialog>
+#include<QMap>
+#include<QList>
+#include<QLabel>
+#include<QPoint>
+#include<QVector>
 #include"gamepackageupdater.h"
 class CKernel;
 typedef void (CKernel::*PFUN)(unsigned int,char*,int);
@@ -58,6 +63,7 @@ public slots:
     void slot_dealroomnotready(unsigned int lSendIP, char *buf, int nlen);
     void slot_dealroomready(unsigned int lSendIP, char *buf, int nlen);
     void slot_dealpiecedown(unsigned int lSendIP, char *buf, int nlen);
+    void slot_dealpiecedownRs(unsigned int lSendIP, char *buf, int nlen);
     void slot_gameoverrq();
     void slot_sendpiecedown(int,int,int);
     void slot_PlayByCpuBegin(int,int,int);
@@ -85,7 +91,11 @@ public slots:
     void slot_externalProcessFinished(int exitCode, QProcess::ExitStatus status);
 public:
     void sendData(char*,int);
+    void sendData(char* buf, int nlen, int expectPackType);
     void setnetpackmap();
+    // 延迟探测：发包注册期望回包类型；分发命中后删除并算 RTT
+    void registerLatencyExpect(int expectPackType);
+    void removeLatencyExpect(int expectPackType);
 public:
     //窗体成员
     Dialog* m_dialog;
@@ -110,6 +120,9 @@ public:
     char m_reconnectToken[_MAX_SIZE];
     bool m_reconnecting;
     bool m_reconnectInGame;
+    // 对局重连：成员列表结束前若落子包抢先到达则缓存，避免未 start 就落子导致回合错乱
+    QVector<QPoint> m_reconnectMovePos;
+    QVector<int> m_reconnectMoveColor;
 
     // 外部游戏专区
     GamePackageUpdater *m_gameUpdater = nullptr;
@@ -122,6 +135,15 @@ public:
     void abortExternalEnter(const QString &reason);
     QString gamesRootPath() const;
 
+    // 网络延迟（仅 UI，不改房间逻辑）
+    QMap<int, QList<qint64>> m_latencyExpectTicks; // expectPackType → 发送时刻队列
+    qint64 m_lastRttMs = -1;
+    QLabel *m_latencyLabel = nullptr; // 共享标签，挂在当前可见主窗口右下角
+    int expectPackTypeForRequest(int requestPackType) const;
+    void onLatencySample(qint64 rttMs);
+    void updateNetLatencyUi();
+    QWidget *currentLatencyHost() const;
+    void sendLogoutHard(); // 主动退出：通知服务端硬断
 signals:
 
 };

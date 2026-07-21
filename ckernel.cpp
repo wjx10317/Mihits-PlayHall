@@ -16,6 +16,8 @@ qRegisterMetaType<classname>("classname");
 #include<QDir>
 #include<QProcess>
 #include<QProgressDialog>
+#include<QDateTime>
+#include<QLabel>
 #include"gamepackageupdater.h"
 void CKernel::ConfigSet()
 {
@@ -102,7 +104,6 @@ CKernel::CKernel(QObject *parent):
     connect(m_fiveinlinezone,SIGNAL(SIG_ALLRECORD()),this,SLOT(slot_sendrecordrq()));
     connect(m_fiveinlinezone,SIGNAL(SIG_SINGLERECORD(QString)),this,SLOT(slot_sendsinglerecordrq(QString)));
     connect(m_roomdialog,SIGNAL(SIG_SHOWBACK()),this,SLOT(slot_reshowwindow()));
-    // Phase1: 心跳 + 断线检测
     connect(&m_heartbeatTimer, SIGNAL(timeout()), this, SLOT(slot_sendHeartbeat()));
     connect(m_client, SIGNAL(SIG_disConnect()), this, SLOT(slot_disConnect()));
     qApp->installEventFilter(this);
@@ -126,9 +127,36 @@ CKernel::CKernel(QObject *parent):
     connect(m_externalProcess,
             QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, &CKernel::slot_externalProcessFinished);
+    // FailedToStart 等不会走 finished；崩溃多数仍有 finished(CrashExit)，两侧都收更稳
+    connect(m_externalProcess, &QProcess::errorOccurred, this,
+            [this](QProcess::ProcessError err) {
+                if (err == QProcess::FailedToStart)
+                {
+                    if (m_zoneid != 0 && m_zoneid != Five_In_Line)
+                        slot_leavezone();
+                    else if (m_dialog && !m_dialog->isVisible())
+                        m_dialog->show();
+                    m_pendingExternalZone = 0;
+                    m_externalLaunching = false;
+                }
+            });
+
+    // 大厅/分区/房间共用一个延迟标签，始终贴在当前可见窗口右下角
+    m_latencyLabel = new QLabel;
+    m_latencyLabel->setObjectName(QStringLiteral("lb_netlatency"));
+    m_latencyLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_latencyLabel->setStyleSheet(
+        QStringLiteral("color: rgb(240, 240, 240); background-color: rgba(0, 0, 0, 120); padding: 4px;"));
+    m_latencyLabel->hide();
 }
 bool CKernel::eventFilter(QObject *obj, QEvent *event)
 {
+    if (event->type() == QEvent::Show
+        && (obj == m_dialog || obj == m_fiveinlinezone || obj == m_roomdialog))
+    {
+        // 切页后把共享延迟标签挂到当前窗口同一位置
+        QTimer::singleShot(0, this, [this] { updateNetLatencyUi(); });
+    }
     if (event->type() == QEvent::KeyPress && m_id != 0)
     {
         QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
@@ -147,9 +175,35 @@ bool CKernel::eventFilter(QObject *obj, QEvent *event)
 void CKernel::Des_Instance()
 {
     qDebug()<<__func__;
+    m_heartbeatTimer.stop();
+    // 主动退出：先硬断注销，并屏蔽断线弹窗，避免被当成软断重连
+    if (m_client)
+        m_client->blockSignals(true);
+    sendLogoutHard();
+    if (m_client)
+        m_client->CloseNet();
+
+    if (m_latencyLabel)
+    {
+        m_latencyLabel->setParent(nullptr);
+        delete m_latencyLabel;
+        m_latencyLabel = nullptr;
+    }
     delete m_dialog;
     delete m_client;
+    m_client = nullptr;
     delete m_logindialog;
+}
+
+void CKernel::sendLogoutHard()
+{
+    if (!m_client || m_id == 0)
+        return;
+    STRU_FIL_LOGOUT_RQ rq;
+    rq.userid = m_id;
+    sendData((char*)&rq, sizeof(rq));
+    m_id = 0;
+    memset(m_reconnectToken, 0, sizeof(m_reconnectToken));
 }
 void CKernel::setnetpackmap()
 {
@@ -167,6 +221,7 @@ void CKernel::setnetpackmap()
     //m_NetPackMap[ DEF_FIL_DISCARD_THIS-_DEF_PACK_BASE]=&CKernel::slot_
     //m_NetPackMap[ DEF_FIL_SURREND     -_DEF_PACK_BASE]=&CKernel::slot_
     m_NetPackMap[ DEF_FIL_PIECEDOWN   -_DEF_PACK_BASE]=&CKernel::slot_dealpiecedown;
+    m_NetPackMap[ DEF_FIL_PIECEDOWN_RS -_DEF_PACK_BASE]=&CKernel::slot_dealpiecedownRs;
     m_NetPackMap[DEF_FIL_ALLRECORD_RS - _DEF_PACK_BASE] = &CKernel::slot_deal_allrecordrs;
     m_NetPackMap[DEF_FIL_SINGLERECORD_RS - _DEF_PACK_BASE] = &CKernel::slot_deal_singlerecordrs;
     m_NetPackMap[DEF_FIL_RECONNECT_RS - _DEF_PACK_BASE] = &CKernel::slot_reconnectRs;
@@ -176,18 +231,129 @@ void CKernel::setnetpackmap()
 }
 void CKernel::sendData(char* buf , int nlen )
 {
-    m_client->SendData(0,buf,nlen);
+    sendData(buf, nlen, 0);
 }
+
+void CKernel::sendData(char* buf, int nlen, int expectPackType)
+{
+    if (expectPackType == 0 && buf && nlen >= (int)sizeof(int))
+    {
+        const int reqType = *(int*)buf;
+        expectPackType = expectPackTypeForRequest(reqType);
+    }
+    if (expectPackType != 0)
+        registerLatencyExpect(expectPackType);
+    m_client->SendData(0, buf, nlen);
+}
+
+int CKernel::expectPackTypeForRequest(int requestPackType) const
+{
+    switch (requestPackType)
+    {
+    case _DEF_PACK_REGISTER_RQ:   return _DEF_PACK_REGISTER_RS;
+    case _DEF_PACK_LOGIN_RQ:      return _DEF_PACK_LOGIN_RS;
+    case DEF_JOIN_ROOM_RQ:        return DEF_JOIN_ROOM_RS;
+    // DEF_ZONE_INFO_RQ：分区内每秒轮询，不宜当 RTT 样本（队列膨胀/延迟被刷屏）
+    case DEF_FIL_ALLRECORD_RQ:    return DEF_FIL_ALLRECORD_RS;
+    case DEF_FIL_SINGLERECORD_RQ: return DEF_FIL_SINGLERECORD_RS;
+    case DEF_FIL_RECONNECT_RQ:    return DEF_FIL_RECONNECT_RS;
+    case DEF_GAME_VERSION_RQ:     return DEF_GAME_VERSION_RS;
+    // 心跳无回包；JOIN/LEAVE ZONE 无 RS；广播类包不对称且易误匹配，不注册
+    default:                      return 0;
+    }
+}
+
+void CKernel::registerLatencyExpect(int expectPackType)
+{
+    if (expectPackType == 0)
+        return;
+    m_latencyExpectTicks[expectPackType].append(QDateTime::currentMSecsSinceEpoch());
+}
+
+void CKernel::removeLatencyExpect(int expectPackType)
+{
+    auto it = m_latencyExpectTicks.find(expectPackType);
+    if (it == m_latencyExpectTicks.end() || it->isEmpty())
+        return;
+    it->removeFirst();
+    if (it->isEmpty())
+        m_latencyExpectTicks.erase(it);
+}
+
+void CKernel::onLatencySample(qint64 rttMs)
+{
+    if (rttMs < 0)
+        return;
+    m_lastRttMs = rttMs;
+    updateNetLatencyUi();
+}
+
+QWidget *CKernel::currentLatencyHost() const
+{
+    // 房间 > 分区 > 大厅（同时可见时取最上层业务页）
+    if (m_roomdialog && m_roomdialog->isVisible())
+        return m_roomdialog;
+    if (m_fiveinlinezone && m_fiveinlinezone->isVisible())
+        return m_fiveinlinezone;
+    if (m_dialog && m_dialog->isVisible())
+        return m_dialog;
+    return nullptr;
+}
+
+void CKernel::updateNetLatencyUi()
+{
+    if (!m_latencyLabel)
+        return;
+
+    QString tip;
+    if (m_lastRttMs < 0)
+        tip.clear();
+    else if (m_lastRttMs >= _DEF_NET_UNSTABLE_RTT_MS)
+        tip = QStringLiteral("网络不稳定  %1 ms").arg(m_lastRttMs);
+    else
+        tip = QStringLiteral("延迟  %1 ms").arg(m_lastRttMs);
+
+    QWidget *host = currentLatencyHost();
+    if (!host || tip.isEmpty())
+    {
+        m_latencyLabel->hide();
+        return;
+    }
+
+    constexpr int kW = 280;
+    constexpr int kH = 28;
+    constexpr int kMargin = 16;
+
+    if (m_latencyLabel->parentWidget() != host)
+        m_latencyLabel->setParent(host);
+
+    m_latencyLabel->setText(tip);
+    m_latencyLabel->setGeometry(host->width() - kW - kMargin,
+                                host->height() - kH - kMargin,
+                                kW, kH);
+    m_latencyLabel->raise();
+    m_latencyLabel->show();
+}
+
 void CKernel::slot_deal_readydata(unsigned int lSendIP , char* buf , int nlen)
 {
     int type = *(int*)buf;
     if(type>=_DEF_PACK_BASE&&type<_DEF_PACK_BASE+_DEF_PACK_COUNT)
     {
+        auto it = m_latencyExpectTicks.find(type);
+        if (it != m_latencyExpectTicks.end() && !it->isEmpty())
+        {
+            const qint64 startTick = it->first();
+            removeLatencyExpect(type);
+            onLatencySample(QDateTime::currentMSecsSinceEpoch() - startTick);
+        }
+
         PFUN pf = NetPackMap(type);
         if(pf==nullptr)
         {
 
             qDebug()<<"fun ptr not inititalized:"<<type;
+            delete [] buf;
             return ;
         }
         (this->*pf)(lSendIP,buf,nlen);
@@ -250,12 +416,22 @@ void CKernel::slot_loginRs(unsigned int , char* buf , int)
         QMessageBox::about(this->m_logindialog,"提示","密码错误");
         break;
         case login_success:
+        // 重新登录：刷新本地会话态，与服务端新 USER_INFO 对齐
+        m_heartbeatTimer.stop();
+        m_rqtimer.stop();
+        m_reconnecting = false;
+        m_reconnectInGame = false;
+        m_zoneid = 0;
+        m_roomid = 0;
+        m_ishost = false;
+        m_roomdialog->clearroom();
+        m_roomdialog->hide();
+        m_fiveinlinezone->hide();
         m_logindialog->hide();
         m_dialog->show();
         m_id = rs.userid;
         m_username = QString::fromStdString(rs.name);
         strcpy_s(m_reconnectToken, rs.token);
-        // 启动心跳（每 5 秒发一次）
         m_heartbeatTimer.start(_DEF_HEARTBEAT_INTERVAL_MS);
         break;
         default:
@@ -333,8 +509,9 @@ void CKernel::slot_joinroomrs( unsigned int , char* buf , int )
     //同理
     m_roomdialog->show();
     m_roomdialog->setinfo(m_roomid);
-
-
+    // 局内观战：立刻隐藏准备/开始（不等 GAME_START）；棋盘由后续 PIECEDOWN 同步
+    if (rs->inGame == 1)
+        m_roomdialog->setGameStart();
 }
 void CKernel::slot_roommemberrq( unsigned int  , char* buf , int )
 {
@@ -345,6 +522,12 @@ void CKernel::slot_roommemberrq( unsigned int  , char* buf , int )
         if (m_reconnectInGame)
         {
             m_roomdialog->setGameStart();
+            for (int i = 0; i < m_reconnectMovePos.size(); ++i)
+                m_roomdialog->slot_piecedown(m_reconnectMoveColor[i],
+                                             m_reconnectMovePos[i].x(),
+                                             m_reconnectMovePos[i].y());
+            m_reconnectMovePos.clear();
+            m_reconnectMoveColor.clear();
             m_reconnectInGame = false;
         }
         return;
@@ -502,7 +685,34 @@ void CKernel::slot_dealroomstart(unsigned int, char* buf , int)
 void CKernel::slot_dealpiecedown(unsigned int, char* buf , int)
 {
     STRU_FIL_PIECEDOWN* rq = (STRU_FIL_PIECEDOWN*)buf;
+    // 重连恢复中：先缓存，等 ROOM_MEMBER 结束包触发 setGameStart 后再按序落子
+    if (m_reconnectInGame)
+    {
+        m_reconnectMovePos.push_back(QPoint(rq->x, rq->y));
+        m_reconnectMoveColor.push_back(rq->color);
+        return;
+    }
     m_roomdialog->slot_piecedown(rq->color,rq->x,rq->y);
+}
+
+void CKernel::slot_dealpiecedownRs(unsigned int, char* buf, int)
+{
+    STRU_FIL_PIECEDOWN_RS* rs = (STRU_FIL_PIECEDOWN_RS*)buf;
+    if (rs->result == piecedown_ok)
+        return;
+
+    const char* role = "观战";
+    if (rs->status == _host)
+        role = "黑方/房主";
+    else if (rs->status == _player)
+        role = "白方/玩家";
+
+    QString tip = QString::fromUtf8("落子异常 [%1] uid=%2\n%3")
+                      .arg(QString::fromUtf8(role))
+                      .arg(rs->userid)
+                      .arg(QString::fromUtf8(rs->reason));
+    QMessageBox::warning(m_roomdialog ? static_cast<QWidget*>(m_roomdialog) : nullptr,
+                         QString::fromUtf8("落子失败"), tip);
 }
 
 void CKernel::slot_gameoverrq()
@@ -627,21 +837,25 @@ void CKernel::slot_deal_singlerecordrs(unsigned int, char *buf, int)
     STRU_FIL_SINGLERECORD_RS* rs = (STRU_FIL_SINGLERECORD_RS*)buf;
     if(rs->result)
     {
-        m_roomdialog->show();
-        m_roomdialog->setrecordstatus(QString(rs->hostname),QString(rs->playername),rs->hostid,rs->playerid);
-        m_fiveinlinezone->hide();
+        // 避免重连缓存把录像落子吃掉或乱序回放
+        m_reconnectInGame = false;
+        m_reconnectMovePos.clear();
+        m_reconnectMoveColor.clear();
+        // 先清记录列表再进详情，避免列表窗口残留条目
         m_fiveinlinezone->hidelist();
-
-
+        m_roomdialog->setrecordstatus(QString(rs->hostname),QString(rs->playername),rs->hostid,rs->playerid);
+        m_roomdialog->show();
+        m_fiveinlinezone->hide();
     }
     else
        QMessageBox::information(nullptr, "提示", "对局数据异常，暂不支持查看");
-
-
 }
 
 void CKernel::slot_reshowwindow()
 {
+    // 退出对局回看：清本地房间 UI，不发包（未加入服务端房间）
+    m_roomdialog->clearroom();
+    m_roomdialog->hide();
     m_fiveinlinezone->show();
 }
 
@@ -688,13 +902,20 @@ void CKernel::slot_opponentDisconnect(unsigned int, char *buf, int)
         return;
     }
 
-    if (rq->kind == DEF_DISCONNECT_HARD && rq->status <= _player)
+    if (rq->kind == DEF_DISCONNECT_HARD)
     {
-        STRU_LEAVE_ROOM_RQ leave;
-        leave.userid = rq->userid;
-        leave.status = rq->status;
-        leave.roomid = rq->roomid;
-        slot_leaveroomrq(0, (char*)&leave, sizeof(leave));
+        if (rq->status <= _player)
+        {
+            STRU_LEAVE_ROOM_RQ leave;
+            leave.userid = rq->userid;
+            leave.status = rq->status;
+            leave.roomid = rq->roomid;
+            slot_leaveroomrq(0, (char*)&leave, sizeof(leave));
+        }
+        else
+        {
+            m_roomdialog->rmmem(rq->userid);  // spec：静默移除
+        }
     }
 }
 
@@ -721,6 +942,9 @@ void CKernel::slot_reconnectRs(unsigned int, char *buf, int)
 
     if (rs->zoneid == 0)
     {
+        m_reconnectInGame = false;
+        m_reconnectMovePos.clear();
+        m_reconnectMoveColor.clear();
         m_roomdialog->hide();
         m_fiveinlinezone->hide();
         m_dialog->show();
@@ -730,17 +954,36 @@ void CKernel::slot_reconnectRs(unsigned int, char *buf, int)
 
     if (rs->roomid == 0)
     {
+        m_reconnectInGame = false;
+        m_reconnectMovePos.clear();
+        m_reconnectMoveColor.clear();
         m_dialog->hide();
         m_roomdialog->hide();
-        m_fiveinlinezone->show();
-        m_rqtimer.start(1000);
-        slot_roominfozone();
+        if (rs->zoneid == Five_In_Line)
+        {
+            m_fiveinlinezone->show();
+            m_rqtimer.start(1000);
+            slot_roominfozone();
+        }
+        else
+        {
+            // 外部专区重连：进程已不在，只恢复大厅态（不自动再拉起游戏）
+            m_fiveinlinezone->hide();
+            m_rqtimer.stop();
+            m_dialog->show();
+            m_zoneid = 0;
+            STRU_LEAVE_ZONE leave;
+            leave.userid = m_id;
+            sendData((char*)&leave, sizeof(leave));
+        }
         return;
     }
 
     m_dialog->hide();
     m_fiveinlinezone->hide();
     m_reconnectInGame = (rs->inGame == 1);
+    m_reconnectMovePos.clear();
+    m_reconnectMoveColor.clear();
     m_roomdialog->clearroom();
     m_roomdialog->setinfo(rs->roomid);
     m_roomdialog->show();
@@ -782,6 +1025,7 @@ void CKernel::slot_disConnect()
     }
     else
     {
+        // 软断拒绝重连：不发 LOGOUT，等心跳硬超时清会话
         exit(0);
     }
 }
